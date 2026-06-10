@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KPMG Spend Analytics</title>
+
+<!-- External libraries (permissive licenses, CDN-loaded):
+     D3 v7 (ISC) — visualisation
+     SheetJS xlsx Community (Apache-2.0) — .xlsx parsing
+     No data ever leaves the browser; all parsing/analysis is client-side. -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<style>
+/* =========================================================================
+   1. THEME & KPMG PALETTE
+   Brand (categorical) colors are identical across themes; only canvas,
+   text and grid change between light and dark.
+   ========================================================================= */
+:root{
+  /* KPMG corporate palette */
+  --kpmg-blue:#00338D;
+  --kpmg-medium-blue:#005EB8;
+  --kpmg-light-blue:#0091DA;
+  --kpmg-purple:#483698;
+  --kpmg-dark-purple:#470A68;
+  --kpmg-violet:#6D2077;
+  --kpmg-teal:#00A3A1;
+  --kpmg-green:#43B02A;
+  --kpmg-pink:#C6007E;
+  --kpmg-cobalt:#1E49E2;
+
+  --radius:14px;
+  --radius-sm:9px;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.06);
+  --transition:.22s cubic-bezier(.4,0,.2,1);
+  --font:"Inter","Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif;
+  --sidebar-w:264px;
+}
+
+/* Light theme */
+html[data-theme="light"]{
+  --bg:#f4f6fb;
+  --surface:#ffffff;
+  --surface-2:#f7f9fc;
+  --border:#e6eaf2;
+  --text:#0f1b33;
+  --text-muted:#5b6b80;
+  --text-faint:#8a96ac;
+  --accent:var(--kpmg-blue);
+  --accent-soft:rgba(0,51,141,.08);
+  --axis:#aeb8cc;
+  --grid:#eef1f7;
+  --sidebar-bg:#0a1d4d;
+  --sidebar-text:#e8edf8;
+  --sidebar-muted:#9fb0d6;
+  --sidebar-active:rgba(255,255,255,.12);
+  --kpi-accent:var(--kpmg-light-blue);
+  --logo-fill:#ffffff;
+}
+
+/* Dark theme */
+html[data-theme="dark"]{
+  --bg:#0a1124;
+  --surface:#121b35;
+  --surface-2:#0e1730;
+  --border:#22304f;
+  --text:#eaf0ff;
+  --text-muted:#9fadc9;
+  --text-faint:#6c7c9e;
+  --accent:var(--kpmg-light-blue);
+  --accent-soft:rgba(0,145,218,.14);
+  --axis:#3a4a6e;
+  --grid:#1b2747;
+  --sidebar-bg:#060c1c;
+  --sidebar-text:#e8edf8;
+  --sidebar-muted:#7e8fb5;
+  --sidebar-active:rgba(255,255,255,.08);
+  --kpi-accent:var(--kpmg-light-blue);
+  --logo-fill:#ffffff;
+}
+
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0;font-family:var(--font);background:var(--bg);color:var(--text);
+  -webkit-font-smoothing:antialiased;font-size:14px;line-height:1.45;
+  transition:background var(--transition),color var(--transition);
+}
+
+/* =========================================================================
+   2. APP SHELL / LAYOUT
+   ========================================================================= */
+.app{display:flex;min-height:100vh;}
+
+.sidebar{
+  width:var(--sidebar-w);flex:0 0 var(--sidebar-w);background:var(--sidebar-bg);
+  color:var(--sidebar-text);display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.brand{padding:24px 22px 18px;display:flex;align-items:center;gap:12px;}
+.brand-logo{height:34px;width:auto;display:block;color:var(--logo-fill);margin-bottom:5px;}
+.brand-sub{font-size:11px;color:var(--sidebar-muted);letter-spacing:.12em;text-transform:uppercase;margin-top:2px;}
+
+.nav{padding:8px 12px;flex:1;}
+.nav-group-label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--sidebar-muted);
+  padding:14px 12px 6px;}
+.nav-item{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;
+  color:var(--sidebar-text);cursor:pointer;font-weight:500;font-size:13.5px;
+  transition:background var(--transition);user-select:none;text-decoration:none;
+}
+.nav-item:hover{background:var(--sidebar-active);}
+.nav-item.active{background:var(--sidebar-active);box-shadow:inset 3px 0 0 var(--kpmg-light-blue);}
+.nav-item.disabled{opacity:.4;cursor:not-allowed;}
+.nav-dot{width:8px;height:8px;border-radius:50%;background:var(--kpmg-light-blue);flex:0 0 8px;}
+
+.sidebar-footer{padding:14px 16px;border-top:1px solid rgba(255,255,255,.08);}
+.data-status{font-size:12px;color:var(--sidebar-muted);margin-bottom:12px;line-height:1.5;}
+.data-status b{color:#fff;font-weight:600;}
+
+.theme-toggle{
+  display:flex;background:rgba(255,255,255,.08);border-radius:10px;padding:4px;gap:4px;
+}
+.theme-toggle button{
+  flex:1;border:0;background:transparent;color:var(--sidebar-muted);padding:7px;border-radius:7px;
+  cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;transition:all var(--transition);
+}
+.theme-toggle button.active{background:rgba(255,255,255,.16);color:#fff;}
+
+/* Main */
+.main{flex:1;min-width:0;display:flex;flex-direction:column;}
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:20px 32px;border-bottom:1px solid var(--border);background:var(--surface);
+}
+.topbar h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em;}
+.topbar .subtitle{font-size:13px;color:var(--text-muted);margin-top:2px;}
+.topbar-actions{display:flex;gap:10px;align-items:center;}
+
+.content{padding:28px 32px 60px;flex:1;}
+
+/* Buttons */
+.btn{
+  border:1px solid var(--border);background:var(--surface);color:var(--text);
+  padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;
+  font-family:inherit;transition:all var(--transition);display:inline-flex;align-items:center;gap:8px;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent);}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.btn-primary:hover{filter:brightness(1.08);color:#fff;}
+.btn-ghost{background:transparent;}
+
+/* =========================================================================
+   3. CARDS / GRID / KPI
+   ========================================================================= */
+.grid{display:grid;gap:20px;}
+.grid-2{grid-template-columns:repeat(2,minmax(0,1fr));}
+@media(max-width:1100px){.grid-2{grid-template-columns:1fr;}}
+
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:20px 22px;transition:background var(--transition),border var(--transition);
+}
+.card-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
+.card-title{font-size:14.5px;font-weight:700;margin:0;}
+.card-sub{font-size:12px;color:var(--text-muted);margin-top:2px;}
+
+.kpi-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:20px;}
+@media(max-width:1100px){.kpi-strip{grid-template-columns:repeat(2,1fr);}}
+.kpi{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 20px;box-shadow:var(--shadow);position:relative;overflow:hidden;
+}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kpi-accent);}
+.kpi-label{font-size:11.5px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;}
+.kpi-value{font-size:26px;font-weight:800;margin-top:6px;letter-spacing:-.02em;}
+.kpi-meta{font-size:12px;color:var(--text-faint);margin-top:4px;}
+
+/* =========================================================================
+   4. UPLOAD / EMPTY STATE
+   ========================================================================= */
+.empty-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:60px 20px;max-width:640px;margin:40px auto;}
+.empty-wrap h2{font-size:24px;margin:0 0 8px;letter-spacing:-.02em;}
+.empty-wrap p{color:var(--text-muted);margin:0 0 28px;font-size:15px;}
+.dropzone{
+  width:100%;border:2px dashed var(--border);border-radius:var(--radius);
+  padding:48px 24px;background:var(--surface);transition:all var(--transition);cursor:pointer;
+}
+.dropzone:hover,.dropzone.drag{border-color:var(--accent);background:var(--accent-soft);}
+.dropzone .dz-icon{font-size:40px;}
+.dropzone .dz-main{font-weight:700;font-size:16px;margin-top:10px;}
+.dropzone .dz-sub{color:var(--text-muted);font-size:13px;margin-top:4px;}
+.empty-actions{display:flex;gap:12px;margin-top:22px;}
+.note{font-size:12px;color:var(--text-faint);margin-top:18px;max-width:520px;}
+.errors{margin-top:16px;width:100%;text-align:left;}
+.error-row{background:rgba(198,0,126,.08);border:1px solid rgba(198,0,126,.3);color:var(--kpmg-pink);
+  padding:8px 12px;border-radius:8px;font-size:12.5px;margin-top:6px;}
+
+/* =========================================================================
+   5. FIELD-MAPPING MODAL
+   ========================================================================= */
+.overlay{position:fixed;inset:0;background:rgba(8,15,35,.55);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;z-index:50;padding:24px;}
+.modal{background:var(--surface);border-radius:var(--radius);box-shadow:0 24px 64px rgba(0,0,0,.3);
+  width:100%;max-width:680px;max-height:88vh;overflow:auto;border:1px solid var(--border);}
+.modal-head{padding:22px 26px 6px;}
+.modal-head h2{margin:0;font-size:18px;}
+.modal-head p{color:var(--text-muted);font-size:13px;margin:6px 0 0;}
+.modal-body{padding:14px 26px;}
+.map-row{display:grid;grid-template-columns:1fr 1.2fr;gap:14px;align-items:center;
+  padding:11px 0;border-bottom:1px solid var(--border);}
+.map-role{font-weight:600;font-size:13.5px;}
+.map-role small{display:block;color:var(--text-faint);font-weight:400;font-size:11.5px;margin-top:1px;}
+.map-row select{
+  width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text);font-family:inherit;font-size:13px;
+}
+.modal-foot{padding:16px 26px 22px;display:flex;justify-content:flex-end;gap:10px;
+  position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--border);}
+
+/* =========================================================================
+   6. CHART PRIMITIVES
+   ========================================================================= */
+.chart-host{width:100%;}
+.axis text{fill:var(--text-muted);font-size:11px;}
+.axis line,.axis path{stroke:var(--axis);}
+.gridline line{stroke:var(--grid);shape-rendering:crispEdges;}
+.gridline path{stroke:none;}
+.bar{transition:opacity var(--transition);}
+.bar:hover{opacity:.82;}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--text-muted);}
+.legend .lg{display:flex;align-items:center;gap:6px;}
+.legend .sw{width:11px;height:11px;border-radius:3px;}
+
+.tooltip{
+  position:fixed;pointer-events:none;z-index:100;background:var(--text);color:var(--bg);
+  padding:8px 11px;border-radius:8px;font-size:12px;font-weight:500;opacity:0;
+  transition:opacity .12s;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:240px;line-height:1.45;
+}
+.tooltip b{font-weight:700;}
+.tip-hint{display:inline-block;margin-top:3px;font-size:10.5px;opacity:.65;font-weight:600;}
+
+/* cross-filter bar */
+.filter-bar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:20px;min-height:30px;}
+.filter-label{font-size:12px;color:var(--text-muted);font-weight:700;}
+.filter-hint{font-size:12.5px;color:var(--text-faint);}
+.chip{display:inline-flex;align-items:center;gap:8px;background:var(--accent-soft);color:var(--accent);
+  border:1px solid var(--border);padding:5px 11px;border-radius:999px;font-size:12.5px;font-weight:600;cursor:pointer;
+  transition:filter var(--transition);}
+.chip:hover{filter:brightness(.97);}
+.chip-x{font-weight:800;opacity:.7;font-size:13px;line-height:1;}
+.chip:hover .chip-x{opacity:1;}
+.btn-sm{padding:5px 11px;font-size:12px;}
+
+/* 360° entity picker */
+.sel-360{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap;}
+.sel-360 label{font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
+.sel-360 select{padding:9px 13px;border-radius:10px;border:1px solid var(--border);background:var(--surface);
+  color:var(--text);font-family:inherit;font-size:13.5px;font-weight:600;min-width:280px;cursor:pointer;}
+.no-data{display:flex;align-items:center;justify-content:center;color:var(--text-faint);
+  font-size:13px;height:160px;text-align:center;padding:0 16px;}
+.anum{display:inline-block;background:var(--accent-soft);color:var(--accent);font-size:11px;
+  font-weight:800;padding:1px 7px;border-radius:6px;margin-right:7px;vertical-align:middle;}
+.heur{display:inline-block;background:rgba(198,0,126,.10);color:var(--kpmg-pink);font-size:10px;
+  font-weight:700;padding:1px 7px;border-radius:6px;margin-left:8px;letter-spacing:.03em;vertical-align:middle;}
+.tbl-wrap{overflow-x:auto;}
+.data-table{width:100%;border-collapse:collapse;font-size:13px;}
+.data-table th,.data-table td{padding:9px 12px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
+.data-table th{color:var(--text-muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+.data-table tbody tr:hover{background:var(--surface-2);}
+.placeholder-dash{padding:48px 24px;text-align:center;color:var(--text-muted);}
+.placeholder-dash h3{color:var(--text);font-size:18px;margin:0 0 8px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div>
+        <svg class="brand-logo" viewBox="0.05 0.2 80.58 32.08" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KPMG"><path d="m 62.74202,0.20119 0,16.00227 -0.20416,0.16862 -0.20416,0.16862 -0.19566,0.17706 -0.18715,0.17705 -0.17864,0.17705 -0.17864,0.18549 -0.17013,0.18548 -0.17014,0.18549 0,-17.42713 -17.88969,0 0,14.56898 -1.48018,0 0,-14.56898 -17.88969,0 0,14.59427 -1.48018,0 0,-14.59427 -17.88969,0 0,16.6346 -4.56813,15.08327 4.01519,0 2.0161,-6.67744 0.57846,0 3.33464,6.67744 4.84885,0 -3.23257,-6.67744 7.33282,0 -2.03311,6.67744 4.38098,0 2.00759,-6.66058 0.96977,0 0,-0.0169 1.37809,0 0.11059,0 8.27707,0 -1.93954,6.66059 4.42351,0 1.87999,-6.66059 1.99058,0 0.051,6.66059 3.70894,0 4.26189,-6.66059 2.79021,0 -1.44615,6.66059 4.35546,0 1.42063,-6.66059 2.51799,0 -0.017,0.3794 0.009,0.38783 0.017,0.37097 0.034,0.37097 0.0255,0.17705 0.0255,0.17706 0.034,0.17705 0.034,0.17706 0.0425,0.17705 0.0425,0.16862 0.051,0.16862 0.051,0.16863 0.0596,0.16862 0.0596,0.16019 0.068,0.16019 0.0681,0.15176 0.0766,0.16019 0.0766,0.15176 0.0851,0.14333 0.0851,0.15176 0.0936,0.14333 0.10208,0.1349 0.10209,0.14333 0.11058,0.12646 0.11059,0.1349 0.11059,0.12647 0.1276,0.12647 0.1276,0.11803 0.16163,0.1349 0.16163,0.1349 0.17013,0.12646 0.17864,0.11804 0.17865,0.11804 0.17864,0.1096 0.18715,0.0927 0.19565,0.10117 0.18715,0.0843 0.19566,0.0843 0.19565,0.0759 0.20416,0.0759 0.20416,0.0675 0.20417,0.059 0.20416,0.059 0.20416,0.0506 0.40832,0.0927 0.41684,0.0675 0.40832,0.059 0.40832,0.0506 0.39982,0.0337 0.39131,0.0169 0.3828,0.0169 0.36579,0 0.4934,-0.008 0.49339,-0.008 0.5019,-0.0253 0.50189,-0.0253 0.5019,-0.0422 0.5019,-0.0422 0.5019,-0.0506 0.5019,-0.059 0.5104,-0.0675 0.51041,-0.0759 0.5104,-0.0843 0.51041,-0.0843 0.5104,-0.0927 0.51041,-0.10117 0.5104,-0.10117 0.51891,-0.11804 1.51421,-6.04511 4.96794,0 0,-25.04043 -17.8897,0 z m -56.4593,24.41653 0.0255,-0.0927 0.0596,0.0927 -0.0851,0 z m 15.58437,-8.97072 -0.2552,0.85155 -2.38189,7.84094 -0.0936,0.27823 -7.82621,0 -0.60398,-1.28154 8.43019,-8.54072 -5.4188,0 -6.59273,7.03999 2.13519,-7.03999 -3.99817,0 0,-13.96193 16.60517,0 0,14.81347 z m 4.61916,6.62686 0,0 -0.1276,0.008 -0.11909,0.008 -0.1276,0.008 -0.13611,0 -0.17864,0 -0.15312,0 -0.14462,0.008 -0.13611,0 -1.06334,-0.008 0.49339,-1.80426 0.22968,-0.8937 0.56145,-2.09934 0.17864,0 0.18715,0 0.17864,-0.008 0.17014,0 0.82515,0 0.5019,0.008 0.45936,0.0169 0.20416,0.008 0.19566,0.0169 0.18715,0.0253 0.17013,0.0253 0.15312,0.0253 0.14462,0.0422 0.13611,0.0422 0.11909,0.0506 0.10208,0.0506 0.0936,0.0675 0.0851,0.0675 0.068,0.0843 0.0425,0.0675 0.034,0.0675 0.034,0.0759 0.0255,0.0843 0.017,0.0927 0.009,0.0927 0,0.10117 0,0.1096 -0.009,0.11804 -0.008,0.11803 -0.0255,0.1349 -0.0255,0.1349 -0.0766,0.28666 -0.0936,0.32038 -0.0936,0.2698 -0.10208,0.26136 -0.11058,0.2445 -0.1191,0.22764 -0.0596,0.10118 -0.0596,0.10117 -0.0681,0.10117 -0.0766,0.0927 -0.0766,0.0927 -0.0766,0.0843 -0.0851,0.0843 -0.0851,0.0759 -0.0936,0.0675 -0.0936,0.0759 -0.10208,0.059 -0.11059,0.0675 -0.11059,0.059 -0.11909,0.0506 -0.1191,0.0506 -0.1276,0.0422 -0.1361,0.0506 -0.14462,0.0337 -0.15312,0.0337 -0.15312,0.0337 -0.17014,0.0253 -0.17013,0.0253 -0.17864,0.0169 -0.18715,0.0169 z m 12.0966,2.34386 1.74389,-6.15472 0.0681,6.15472 -1.81194,0 z m 2.65411,-9.84755 -4.1513,0 -2.85826,9.84755 -4.4065,0 0.20416,-0.0843 0.20416,-0.0843 0.19566,-0.0843 0.19565,-0.0927 0.18715,-0.0927 0.17864,-0.10961 0.17865,-0.10117 0.17013,-0.10961 0.17014,-0.11803 0.16162,-0.11804 0.15313,-0.11803 0.15312,-0.1349 0.14461,-0.12647 0.13611,-0.14333 0.13611,-0.1349 0.1276,-0.15176 0.1276,-0.14332 0.1191,-0.1602 0.11058,-0.15176 0.11059,-0.16862 0.10208,-0.16862 0.0936,-0.16862 0.0936,-0.17706 0.0851,-0.18548 0.0851,-0.18549 0.0766,-0.18548 0.068,-0.19392 0.0681,-0.20234 0.051,-0.20235 0.0596,-0.20235 0.0425,-0.21921 0.0425,-0.21077 0.0596,-0.33725 0.051,-0.32038 0.034,-0.30352 0.0255,-0.28666 0.009,-0.28666 -0.009,-0.26136 -0.008,-0.26137 -0.034,-0.2445 -0.034,-0.22764 -0.0596,-0.22764 -0.0596,-0.21078 -0.0851,-0.20235 -0.0936,-0.19391 -0.10208,-0.19392 -0.11909,-0.17705 -0.13611,-0.16862 -0.11059,-0.11804 -0.11059,-0.11803 -0.11909,-0.10118 -0.1276,-0.0927 -0.13611,-0.0927 -0.13611,-0.0843 -0.14461,-0.0759 -0.14462,-0.0675 -0.15312,-0.0675 -0.15312,-0.0506 -0.16163,-0.0506 -0.16163,-0.0506 -0.17013,-0.0422 -0.17014,-0.0337 -0.17013,-0.0337 -0.17865,-0.0253 -0.36579,-0.0506 -0.36579,-0.0253 -0.37429,-0.0253 -0.38281,-0.008 -0.7656,0 -0.7571,0 -0.23819,0 -0.42534,0 -0.52742,0 -0.58697,0 -0.56995,0 -0.48488,0 -0.34027,0 -0.1276,0 0,-13.93664 16.60517,0 0,13.93664 z m 10.089,9.84755 -2.49247,0 3.77699,-5.90179 -1.28452,5.90179 z m 9.28087,-9.56933 -0.009,3.41461 -0.21267,0.29509 -0.19566,0.30352 -0.19565,0.30352 -0.17864,0.30352 -0.17014,0.30352 -0.17013,0.31195 -0.14462,0.30352 -0.14461,0.30352 -0.13611,0.29509 -0.11909,0.30352 -0.1191,0.29509 -0.10208,0.28666 -0.0936,0.28665 -0.0851,0.27823 -0.0766,0.2698 -0.0681,0.26979 -0.0425,0.17706 -0.0425,0.18548 -0.0425,0.17706 -0.034,0.18548 -0.034,0.17705 -0.0255,0.17706 -0.0255,0.17705 -0.017,0.18549 -2.44144,0 2.08416,-9.82226 -7.02658,-0.008 -6.28649,9.83069 -0.45936,0 0,-23.78419 16.61368,0 0,14.21486 z m 9.5786,13.59097 -0.34878,0.059 -0.35728,0.0506 -0.35729,0.0506 -0.34877,0.0422 -0.34878,0.0337 -0.34878,0.0253 -0.34027,0.0169 -0.34027,0 -0.22117,0 -0.22118,-0.008 -0.21267,-0.0169 -0.21266,-0.0253 -0.20417,-0.0337 -0.19565,-0.0337 -0.19566,-0.0422 -0.18714,-0.0506 -0.17865,-0.059 -0.17864,-0.059 -0.17013,-0.0759 -0.16163,-0.0759 -0.16163,-0.0927 -0.15312,-0.0927 -0.14462,-0.10117 -0.1361,-0.10118 -0.13611,-0.11803 -0.1191,-0.12647 -0.11909,-0.12647 -0.11059,-0.14333 -0.10208,-0.14332 -0.0936,-0.1602 -0.0851,-0.16019 -0.0851,-0.16862 -0.0681,-0.17705 -0.0596,-0.19392 -0.051,-0.19391 -0.051,-0.20235 -0.034,-0.21078 -0.0255,-0.21921 -0.017,-0.22764 -0.009,-0.23607 7.74114,0 -0.85067,3.39774 z m 9.81679,-4.02164 -4.18532,0 0.68904,-2.74855 -8.38765,0 -0.68905,2.74855 -4.05772,0 0,-0.56489 0.051,-0.23607 0.0425,-0.23607 0.051,-0.25294 0.051,-0.25293 0.0766,-0.27823 0.0766,-0.27822 0.0851,-0.27823 0.0936,-0.2698 0.10208,-0.26979 0.11059,-0.2698 0.11909,-0.26136 0.1191,-0.26137 0.13611,-0.26136 0.1361,-0.2445 0.14462,-0.25294 0.16163,-0.23607 0.16163,-0.23607 0.16162,-0.22764 0.17865,-0.21921 0.18714,-0.21078 0.19566,-0.20235 0.19566,-0.18548 0.21266,-0.18548 0.21267,-0.17706 0.22118,-0.16019 0.23819,-0.15176 0.23819,-0.1349 0.24669,-0.12646 0.2552,-0.11804 0.26371,-0.10117 0.27222,-0.0843 0.28072,-0.0675 0.28923,-0.059 0.29774,-0.0422 0.30624,-0.0253 0.31475,-0.008 0.2467,0.008 0.24669,0.0169 0.2467,0.0337 0.23819,0.0506 0.11909,0.0337 0.11059,0.0337 0.11059,0.0337 0.10208,0.0506 0.10208,0.0422 0.10208,0.059 0.0936,0.059 0.0936,0.059 0.0851,0.0759 0.0851,0.0759 0.0766,0.0759 0.0766,0.0927 0.0681,0.0843 0.0596,0.10117 0.051,0.1096 0.051,0.10961 0.0425,0.11804 0.034,0.12646 0.0255,0.12647 0.0255,0.14333 0.009,0.14333 0,0.15176 0,0.16019 -0.017,0.16862 5.00197,0 0.0766,-0.34568 0.0681,-0.39626 0.034,-0.21078 0.017,-0.22764 0.017,-0.22764 0,-0.23607 -0.008,-0.2445 -0.0255,-0.25293 -0.0255,-0.11804 -0.017,-0.12647 -0.034,-0.12646 -0.034,-0.12647 -0.0425,-0.1349 -0.0425,-0.12646 -0.051,-0.12647 -0.0596,-0.12647 -0.0596,-0.12647 -0.0766,-0.12646 -0.0766,-0.12647 -0.0851,-0.12647 -0.10208,-0.13489 -0.11059,-0.12647 -0.11059,-0.12647 -0.11909,-0.11803 -0.1276,-0.11804 -0.13611,-0.1096 -0.13611,-0.10118 -0.14461,-0.10117 -0.15313,-0.10117 -0.15312,-0.0843 -0.16162,-0.0843 -0.17014,-0.0843 -0.17013,-0.0759 -0.17865,-0.0759 -0.18715,-0.0675 -0.18714,-0.0675 -0.18715,-0.059 -0.20416,-0.0506 -0.19566,-0.0506 -0.21267,-0.0506 -0.21267,-0.0422 -0.21267,-0.0422 -0.22117,-0.0337 -0.22968,-0.0253 -0.46787,-0.0506 -0.47638,-0.0422 -0.5019,-0.0169 -0.51041,-0.008 -0.3828,0.008 -0.39982,0.008 -0.41683,0.0253 -0.43384,0.0337 -0.45086,0.0506 -0.45936,0.059 -0.46787,0.0759 -0.47638,0.10117 -0.23819,0.0506 -0.2467,0.059 -0.23819,0.0675 -0.24669,0.0675 -0.2467,0.0759 -0.24669,0.0843 -0.2467,0.0843 -0.23819,0.0927 -0.24669,0.10117 -0.2467,0.10961 -0.23819,0.1096 -0.2467,0.11804 -0.23818,0.12646 -0.23819,0.1349 -0.23819,0.1349 -0.23819,0.15176 0,-14.92308 16.6307,0 0,23.78419 z" fill="currentColor"/></svg>
+        <div class="brand-sub">Spend Analytics</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-footer">
+      <div class="data-status" id="dataStatus">No data loaded.</div>
+      <div class="theme-toggle" id="themeToggle">
+        <button data-theme-set="light">Light</button>
+        <button data-theme-set="dark">Dark</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="viewTitle">Overview</h1>
+        <div class="subtitle" id="viewSubtitle">Load spend data to begin.</div>
+      </div>
+      <div class="topbar-actions" id="topActions"></div>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".xlsx,.xls" multiple style="display:none" />
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   KPMG SPEND ANALYTICS — single-file client-side app
+   Sections:
+     A. State & persistence
+     B. Theme
+     C. Number / date helpers
+     D. D3 chart helpers
+     E. Data ingestion (SheetJS)
+     F. Field auto-detect + mapping
+     G. Dashboard registry
+     H. Reference dashboard: Overview
+     I. Synthetic sample data
+     J. Router / shell rendering
+     K. Init
+   ========================================================================= */
+
+/* ----- A. State & persistence ---------------------------------------- */
+const LS_THEME = "kpmg_spend_theme";
+const LS_MAPPING = "kpmg_spend_mapping";
+
+const State = {
+  rows: [],            // combined dataset (array of row objects, each tagged __source)
+  columns: [],         // detected column names
+  mapping: {},         // role -> column name
+  sources: [],         // loaded file names
+  isSample: false,
+  activeView: null,
+  errors: [],
+  detectedPreset: null,// recognised layout label, if any
+};
+
+/* Canonical spend roles. Analyses key off these, not raw column names.
+   Defaults below align with the SAP MM (DE) procurement long-list. */
+const ROLES = [
+  {key:"amount",          label:"Spend (invoiced)",  hint:"erf. RechnBetrag HW — invoiced amount (primary spend)", type:"number", required:true},
+  {key:"order_value",     label:"Order net value",   hint:"Bestellnettowert — PO net value",        type:"number"},
+  {key:"unit_price",      label:"Unit price",        hint:"Nettopreis — net price per unit",         type:"number"},
+  {key:"quantity",        label:"Quantity",          hint:"Bestellmenge — order quantity",           type:"number"},
+  {key:"date",            label:"Document date",     hint:"Belegdatum — posting / order date",       type:"date"},
+  {key:"delivery_date",   label:"Delivery date",     hint:"Lieferdatum — actual/confirmed delivery", type:"date"},
+  {key:"plan_delivery_date",label:"Planned delivery",hint:"Stat.Lieferdatum — statistical/planned",  type:"date"},
+  {key:"supplier",        label:"Supplier",          hint:"Name des Lieferanten",                    type:"text"},
+  {key:"manufacturer",    label:"Manufacturer",      hint:"Hersteller — OEM",                        type:"text"},
+  {key:"category",        label:"Material group",    hint:"Warengruppenbez.",                        type:"text"},
+  {key:"material",        label:"Material no.",      hint:"Material",                                type:"text"},
+  {key:"material_text",   label:"Material text",     hint:"Kurztext — short description",            type:"text"},
+  {key:"classification",  label:"Material / Service",hint:"Kategorisierung",                         type:"text"},
+  {key:"purchasing_org",  label:"Purchasing org",    hint:"EinkOrganisation",                        type:"text"},
+  {key:"purchasing_group",label:"Purchasing group",  hint:"Einkäufergruppe",                         type:"text"},
+  {key:"document_no",     label:"Purchasing doc.",   hint:"Einkaufsbeleg — PO number",               type:"text"},
+  {key:"currency",        label:"Currency",          hint:"Währung",                                 type:"text"},
+];
+
+function saveTheme(t){ try{localStorage.setItem(LS_THEME,t);}catch(e){} }
+function loadTheme(){ try{return localStorage.getItem(LS_THEME);}catch(e){return null;} }
+function saveMapping(m){ try{localStorage.setItem(LS_MAPPING,JSON.stringify(m));}catch(e){} }
+function loadMapping(){ try{return JSON.parse(localStorage.getItem(LS_MAPPING)||"{}");}catch(e){return {};} }
+
+/* ----- B. Theme ------------------------------------------------------- */
+function setTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  saveTheme(t);
+  document.querySelectorAll("#themeToggle button").forEach(b=>{
+    b.classList.toggle("active", b.dataset.themeSet===t);
+  });
+  if(State.activeView) renderActiveDashboard();   // recolor axes/text/grid
+}
+
+/* ----- C. Number / date helpers -------------------------------------- */
+function currencyCode(){
+  if(State.mapping.currency){
+    const counts={};
+    for(const r of State.rows){ const c=r[State.mapping.currency]; if(c) counts[c]=(counts[c]||0)+1; }
+    const top=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+    if(top) return String(top[0]).toUpperCase().slice(0,3);
+  }
+  return "USD";
+}
+function fmtCurrency(v){
+  try{ return new Intl.NumberFormat(undefined,{style:"currency",currency:currencyCode(),
+    maximumFractionDigits:0}).format(v); }
+  catch(e){ return fmtNumber(v); }
+}
+function fmtAbbrev(v){
+  const code=currencyCode();
+  const sym=(()=>{try{return (0).toLocaleString(undefined,{style:"currency",currency:code})
+    .replace(/[\d.,\s]/g,"");}catch(e){return "";}})();
+  const a=Math.abs(v);let s;
+  if(a>=1e9) s=(v/1e9).toFixed(1)+"B";
+  else if(a>=1e6) s=(v/1e6).toFixed(1)+"M";
+  else if(a>=1e3) s=(v/1e3).toFixed(0)+"K";
+  else s=Math.round(v).toString();
+  return sym+s;
+}
+function fmtNumber(v){ return new Intl.NumberFormat().format(Math.round(v)); }
+function fmtPct(v){ return (v*100).toFixed(1)+"%"; }
+
+function coerceNumber(x){
+  if(x==null||x==="") return null;
+  if(typeof x==="number") return isFinite(x)?x:null;
+  let s=String(x).trim().replace(/[^\d.,\-]/g,"");
+  if(s===""||s==="-") return null;
+  // European format (comma decimal, e.g. 1.234,56) vs US (1,234.56)
+  if(/,\d{1,2}$/.test(s) || (s.indexOf(",")>-1 && s.indexOf(".")===-1)) s=s.replace(/\./g,"").replace(",",".");
+  else s=s.replace(/,/g,"");
+  const n=parseFloat(s);
+  return isFinite(n)?n:null;
+}
+function coerceDate(x){
+  if(x==null||x==="") return null;
+  if(x instanceof Date && !isNaN(x)) return x;
+  const d=new Date(x);
+  return isNaN(d)?null:d;
+}
+/* accessor: value for a canonical role on a row (coerced by role type) */
+function val(row, role){
+  const col=State.mapping[role]; if(!col) return null;
+  const raw=row[col];
+  const def=ROLES.find(r=>r.key===role);
+  if(def&&def.type==="number") return coerceNumber(raw);
+  if(def&&def.type==="date")   return coerceDate(raw);
+  return raw==null?null:String(raw).trim();
+}
+function hasRole(role){ return !!State.mapping[role]; }
+
+/* ----- D. D3 chart helpers ------------------------------------------- */
+const KPMG_SCALE=["#00338D","#0091DA","#00A3A1","#483698","#6D2077","#005EB8",
+                  "#43B02A","#C6007E","#470A68","#1E49E2"];
+function kpmgColor(i){ return KPMG_SCALE[i%KPMG_SCALE.length]; }
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+const tooltip=document.getElementById("tooltip");
+function showTip(html,evt){
+  tooltip.innerHTML=html;tooltip.style.opacity="1";
+  const pad=14;let x=evt.clientX+pad,y=evt.clientY+pad;
+  const r=tooltip.getBoundingClientRect();
+  if(x+r.width>window.innerWidth) x=evt.clientX-r.width-pad;
+  if(y+r.height>window.innerHeight) y=evt.clientY-r.height-pad;
+  tooltip.style.left=x+"px";tooltip.style.top=y+"px";
+}
+function hideTip(){ tooltip.style.opacity="0"; }
+
+/* creates a responsive svg sized to its container's current width */
+function makeSvg(container, height, margin){
+  container.innerHTML="";
+  margin=margin||{top:16,right:20,bottom:40,left:60};
+  const width=Math.max(280, container.clientWidth||container.parentElement.clientWidth||600);
+  const innerW=width-margin.left-margin.right;
+  const innerH=height-margin.top-margin.bottom;
+  const svg=d3.select(container).append("svg")
+    .attr("width","100%").attr("height",height)
+    .attr("viewBox",`0 0 ${width} ${height}`).attr("preserveAspectRatio","xMinYMin meet");
+  const g=svg.append("g").attr("transform",`translate(${margin.left},${margin.top})`);
+  return {svg,g,width,height,innerW,innerH,margin};
+}
+function noData(container,msg){ container.innerHTML=`<div class="no-data">${msg||"Not enough data for this view."}</div>`; }
+function legend(container,items){
+  const el=document.createElement("div");el.className="legend";
+  el.innerHTML=items.map(it=>`<span class="lg"><span class="sw" style="background:${it.color}"></span>${it.label}</span>`).join("");
+  container.appendChild(el);
+}
+
+/* ----- E. Data ingestion (SheetJS) ----------------------------------- */
+async function readWorkbook(file){
+  const buf=await file.arrayBuffer();
+  const wb=XLSX.read(buf,{type:"array",cellDates:true});
+  const sheet=wb.Sheets[wb.SheetNames[0]];
+  if(!sheet) throw new Error("no sheets");
+  const json=XLSX.utils.sheet_to_json(sheet,{defval:null,raw:true});
+  if(!json.length) throw new Error("empty sheet");
+  return json;
+}
+async function ingestFiles(fileList){
+  const files=Array.from(fileList).filter(f=>/\.xlsx?$/i.test(f.name));
+  if(!files.length) return;
+  State.errors=[];
+  const all=[]; const names=[];
+  for(const f of files){
+    try{
+      const rows=await readWorkbook(f);
+      rows.forEach(r=>{ r.__source=f.name; all.push(r); });
+      names.push(f.name);
+    }catch(err){
+      State.errors.push(`${f.name}: ${err.message||"could not read file"}`);
+    }
+  }
+  if(!all.length){ renderEmpty(); return; }
+  // real data replaces sample data
+  if(State.isSample){ State.rows=[]; State.sources=[]; State.isSample=false; }
+  State.rows=State.rows.concat(all);
+  State.sources=State.sources.concat(names);
+  detectColumns();
+  autoMap();
+  openMappingModal(true);   // confirm/adjust mapping before showing dashboards
+}
+
+/* ----- F. Field auto-detect + mapping -------------------------------- */
+function detectColumns(){
+  const set=new Set();
+  for(const r of State.rows.slice(0,500)) Object.keys(r).forEach(k=>{ if(k!=="__source") set.add(k); });
+  State.columns=Array.from(set);
+}
+/* Bilingual (EN + German/SAP) heuristics. Exact PRESETS below take priority. */
+const ROLE_PATTERNS={
+  amount:/rechnbetrag|invoiced|amount|spend|gesamtwert|nettowert/i,
+  order_value:/bestellnettowert|order.*value|po.*value|bestellwert/i,
+  unit_price:/nettopreis|unit.*price|net.*price|stückpreis|preis$/i,
+  quantity:/quantity|\bqty\b|units|bestellmenge|^menge/i,
+  date:/belegdatum|doc.*date|posting.*date|order.*date|^date$/i,
+  delivery_date:/^lieferdatum|delivery.*date|actual.*deliv/i,
+  plan_delivery_date:/stat.*lieferdatum|plan.*deliv|statistic.*deliv/i,
+  supplier:/name des lieferanten|supplier|vendor|lieferant.*name|kreditor/i,
+  manufacturer:/hersteller|manufacturer|\boem\b/i,
+  category:/warengruppenbez|warengruppe|material.?group|commodit|categor/i,
+  material:/^material$|material.?no|material.?nr|materialnummer|sku/i,
+  material_text:/kurztext|short.?text|description|bezeichnung/i,
+  classification:/kategorisierung|classification|material.*service|good.*service/i,
+  purchasing_org:/einkorganisation|purchasing.?org|p.?org|einkaufsorg/i,
+  purchasing_group:/einkäufergruppe|einkaeufergruppe|purchasing.?group|buyer.?group/i,
+  document_no:/einkaufsbeleg|purchas.*doc|po.?number|order.?no|document.?no/i,
+  currency:/währung|waehrung|currency|ccy/i,
+};
+/* Exact-column presets for recognised data layouts (applied before patterns). */
+const PRESETS=[{
+  id:"sap_mm_de",
+  label:"SAP MM Purchasing (DE)",
+  signature:["Einkaufsbeleg","Warengruppenbez.","Name des Lieferanten","Belegdatum"],
+  map:{
+    amount:"erf. RechnBetrag HW",
+    order_value:"Bestellnettowert",
+    unit_price:"Nettopreis",
+    quantity:"Bestellmenge",
+    date:"Belegdatum",
+    delivery_date:"Lieferdatum",
+    plan_delivery_date:"Stat.Lieferdatum",
+    supplier:"Name des Lieferanten",
+    manufacturer:"Hersteller",
+    category:"Warengruppenbez.",
+    material:"Material",
+    material_text:"Kurztext",
+    classification:"Kategorisierung",
+    purchasing_org:"EinkOrganisation",
+    purchasing_group:"Einkäufergruppe",
+    document_no:"Einkaufsbeleg",
+    currency:"Währung",
+  }
+}];
+function detectPreset(){
+  for(const p of PRESETS){
+    const hits=p.signature.filter(c=>State.columns.includes(c)).length;
+    if(hits>=Math.ceil(p.signature.length*0.6)) return p;
+  }
+  return null;
+}
+function looksNumeric(col){
+  let n=0,ok=0;
+  for(const r of State.rows.slice(0,200)){ const v=r[col]; if(v==null||v==="")continue; n++; if(coerceNumber(v)!=null) ok++; }
+  return n>0 && ok/n>0.7;
+}
+function looksDate(col){
+  let n=0,ok=0;
+  for(const r of State.rows.slice(0,200)){ const v=r[col]; if(v==null||v==="")continue; n++; if(coerceDate(v)) ok++; }
+  return n>0 && ok/n>0.7;
+}
+function autoMap(){
+  const saved=loadMapping();
+  const m={};
+  const used=new Set();
+  // pass 0: exact preset for recognised layouts (highest confidence)
+  const preset=detectPreset();
+  State.detectedPreset=preset?preset.label:null;
+  if(preset){
+    for(const role in preset.map){
+      const col=preset.map[role];
+      if(State.columns.includes(col)&&!used.has(col)){ m[role]=col; used.add(col); }
+    }
+  }
+  // pass 1: name + type heuristics for still-unmapped roles
+  for(const role of ROLES){
+    if(m[role.key]) continue;
+    const pat=ROLE_PATTERNS[role.key];
+    const cands=State.columns.filter(c=>!used.has(c)&&pat&&pat.test(c));
+    let pick=null;
+    if(role.type==="number") pick=cands.find(looksNumeric)||cands[0];
+    else if(role.type==="date") pick=cands.find(looksDate)||cands[0];
+    else pick=cands[0];
+    if(pick){ m[role.key]=pick; used.add(pick); }
+  }
+  // pass 2: fall back to any numeric/date column for required-ish roles
+  if(!m.amount){ const c=State.columns.find(c=>!used.has(c)&&looksNumeric(c)); if(c){m.amount=c;used.add(c);} }
+  if(!m.date){ const c=State.columns.find(c=>!used.has(c)&&looksDate(c)); if(c){m.date=c;used.add(c);} }
+  // overlay any saved mapping whose column still exists
+  for(const role of ROLES){
+    if(saved[role.key] && State.columns.includes(saved[role.key])) m[role.key]=saved[role.key];
+  }
+  State.mapping=m;
+}
+
+function openMappingModal(initial){
+  const opts=col=>`<option value="">— none —</option>`+
+    State.columns.map(c=>`<option value="${escAttr(c)}" ${State.mapping[col.key]===c?"selected":""}>${escHtml(c)}</option>`).join("");
+  const rows=ROLES.map(r=>`
+    <div class="map-row">
+      <div class="map-role">${r.label}${r.required?' <span style="color:var(--kpmg-pink)">*</span>':''}
+        <small>${r.hint}</small></div>
+      <select data-role="${r.key}">${opts(r)}</select>
+    </div>`).join("");
+  const overlay=document.createElement("div");overlay.className="overlay";overlay.id="mapOverlay";
+  overlay.innerHTML=`
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Map your columns</h2>
+        <p>Match the spend roles below to columns in your file. Detected ${State.columns.length}
+           columns across ${fmtNumber(State.rows.length)} rows. Required roles are marked *.
+           ${State.detectedPreset?`<br>Recognised layout: <b>${escHtml(State.detectedPreset)}</b> — mappings pre-filled, adjust if needed.`:""}</p>
+      </div>
+      <div class="modal-body">${rows}</div>
+      <div class="modal-foot">
+        ${initial?'':'<button class="btn btn-ghost" id="mapCancel">Cancel</button>'}
+        <button class="btn btn-primary" id="mapApply">Apply mapping</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#mapApply").onclick=()=>{
+    const m={};
+    overlay.querySelectorAll("select[data-role]").forEach(sel=>{ if(sel.value) m[sel.dataset.role]=sel.value; });
+    State.mapping=m;saveMapping(m);
+    overlay.remove();
+    refreshShell();
+    navigate(State.activeView||dashboards[0].id);
+  };
+  const cancel=overlay.querySelector("#mapCancel");
+  if(cancel) cancel.onclick=()=>overlay.remove();
+}
+function escHtml(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function escAttr(s){ return escHtml(s).replace(/"/g,"&quot;"); }
+
+/* ----- G. Dashboard registry (modular core) -------------------------- */
+const dashboards=[];
+function registerDashboard(def){ dashboards.push(def); }
+function dashboardReady(d){ return (d.needs||[]).every(role=>hasRole(role)); }
+
+/* ----- H. Analyses: transforms, chart primitives & dashboards -------- */
+const byId=id=>document.getElementById(id);
+
+/* ---------- cross-filter state (spend cube) ---------- */
+State.filters={};        // role -> value (categorical); special key __month -> month timestamp
+State.sel360s=null;      // selected supplier for Lieferant 360
+State.sel360g=null;      // selected Warengruppe for Warengruppe 360
+const ROLE_LABEL={supplier:"Lieferant",category:"Warengruppe",classification:"Art",
+  purchasing_org:"EinkOrg",purchasing_group:"Einkäufergr.",manufacturer:"Hersteller",
+  material:"Material",__month:"Monat"};
+function filteredRowsExcept(skip){
+  let rows=State.rows;
+  for(const role in State.filters){
+    if(role===skip) continue;
+    const v=State.filters[role];
+    if(role==="__month") rows=rows.filter(r=>{const d=val(r,"date");return d&&d3.timeMonth(d).getTime()===v;});
+    else rows=rows.filter(r=>String(val(r,role))===String(v));
+  }
+  return rows;
+}
+function filteredRows(){ return filteredRowsExcept(null); }
+function filterCount(){ return Object.keys(State.filters).length; }
+function filterLabel(role,v){
+  if(role==="__month") return "Monat: "+d3.timeFormat("%b %Y")(new Date(v));
+  return (ROLE_LABEL[role]||role)+": "+v;
+}
+function applyFilter(role,value){
+  if(value==null||value==="(leer)"||value==="Sonstige") return;
+  if(String(State.filters[role])===String(value)) delete State.filters[role]; else State.filters[role]=value;
+  renderView();
+}
+function applyFilters(obj){
+  let changed=false;
+  for(const k in obj){ const v=obj[k]; if(v==null||v==="(leer)"||v==="Sonstige") continue;
+    if(String(State.filters[k])!==String(v)){ State.filters[k]=v; changed=true; } }
+  if(changed) renderView();
+}
+function clearFilters(){ State.filters={}; renderView(); }
+
+/* ---------- generic data helpers (rows passed explicitly) ---------- */
+function amt(r){ return val(r,"amount")||0; }
+function sumAmt(rows){ return d3.sum(rows,amt); }
+function distinct(rows,role){ if(!hasRole(role)) return null;
+  return new Set(rows.map(r=>val(r,role)).filter(v=>v!=null&&v!=="")).size; }
+function rollup(rows, role, valueFn, n){
+  valueFn=valueFn||amt;
+  const roll=d3.rollups(rows, v=>d3.sum(v,valueFn), r=>{const k=val(r,role);return (k==null||k==="")?"(leer)":k;});
+  let arr=roll.map(([key,value])=>({key,value})).filter(d=>d.value!==0).sort((a,b)=>b.value-a.value);
+  if(n&&arr.length>n){const head=arr.slice(0,n);const rest=d3.sum(arr.slice(n),d=>d.value);if(rest)head.push({key:"Sonstige",value:rest});arr=head;}
+  return arr;
+}
+/* enriched per-key stats for rich tooltips + ranked bars */
+function dimStats(rows, role, n){
+  if(!hasRole(role)) return {items:[],total:0};
+  const groups=d3.rollups(rows, v=>v, r=>{const k=val(r,role);return (k==null||k==="")?"(leer)":k;});
+  const total=sumAmt(rows);
+  let items=groups.map(([key,vs])=>({
+    key, value:d3.sum(vs,amt), lines:vs.length,
+    orders:hasRole("document_no")?new Set(vs.map(r=>val(r,"document_no")).filter(Boolean)).size:null,
+    suppliers:hasRole("supplier")?new Set(vs.map(r=>val(r,"supplier")).filter(Boolean)).size:null,
+    groups:hasRole("category")?new Set(vs.map(r=>val(r,"category")).filter(Boolean)).size:null,
+    materials:hasRole("material")?new Set(vs.map(r=>val(r,"material")).filter(Boolean)).size:null,
+  })).sort((a,b)=>b.value-a.value);
+  items.forEach((d,i)=>{ d.rank=i+1; d.share=total?d.value/total:0; });
+  if(n&&items.length>n){ const rest=items.slice(n);
+    items=items.slice(0,n).concat([{key:"Sonstige",value:d3.sum(rest,d=>d.value),lines:d3.sum(rest,d=>d.lines),
+      share:total?d3.sum(rest,d=>d.value)/total:0,isOther:true}]); }
+  return {items,total};
+}
+function dimTip(role,d){
+  const L=[`<b>${escHtml(d.key)}</b>`, `${fmtCurrency(d.value)} · ${fmtPct(d.share||0)} des Spends`];
+  if(d.rank&&!d.isOther) L.push(`Rang #${d.rank}`);
+  if(role!=="supplier"&&d.suppliers!=null) L.push(`${fmtNumber(d.suppliers)} Lieferanten`);
+  if(role!=="category"&&d.groups!=null) L.push(`${fmtNumber(d.groups)} Warengruppen`);
+  if(d.orders) L.push(`${fmtNumber(d.orders)} Bestellungen · Ø ${fmtCurrency(d.value/d.orders)}`);
+  if(!d.isOther) L.push(`<span class="tip-hint">Klick zum Filtern</span>`);
+  return L.join("<br>");
+}
+/* series ready for a clickable, rich-tooltip bar/slice on dimension `role` */
+function dimSeries(rows, role, n, withOther){
+  let {items}=dimStats(rows, role, withOther?n:null);
+  items=items.filter(d=>d.key!=="(leer)");
+  if(!withOther && n) items=items.slice(0,n);
+  items.forEach(d=>{ if(!d.tip) d.tip=dimTip(role,d); });
+  return items;
+}
+
+/* ---------- analysis-specific transforms ---------- */
+function sumAmount(){ return sumAmt(filteredRows()); }
+function distinctCount(role){ return distinct(filteredRows(),role); }
+function aggregate(role, n){ return rollup(filteredRows(), role, amt, n); }
+function aggregateWith(role, valueFn, n, filter){
+  if(!hasRole(role)) return [];
+  const rows=filter?filteredRows().filter(filter):filteredRows();
+  return rollup(rows, role, valueFn, n);
+}
+function topItems(role,n){ return aggregate(role).filter(d=>d.key&&d.key!=="(leer)").slice(0,n||10); }
+function abcClassify(items){
+  const sorted=(items||[]).slice().sort((a,b)=>b.value-a.value);
+  const grand=sorted.reduce((s,d)=>s+d.value,0)||1; let cum=0;
+  return sorted.map((d,i)=>{cum+=d.value;const cp=cum/grand;
+    return {key:d.key,value:d.value,idx:i+1,cumPct:cp,cls:cp<=0.8?"A":cp<=0.95?"B":"C"};});
+}
+function distinctSupplierByGroup(n, rows){
+  rows=rows||filteredRows();
+  if(!hasRole("category")||!hasRole("supplier")) return [];
+  const roll=d3.rollups(rows, v=>new Set(v.map(r=>val(r,"supplier")).filter(Boolean)).size, r=>val(r,"category")||"(leer)");
+  return roll.map(([key,value])=>({key,value,tip:`<b>${escHtml(key)}</b><br>${fmtNumber(value)} Lieferanten<br><span class="tip-hint">Klick zum Filtern</span>`}))
+    .filter(d=>d.key!=="(leer)").sort((a,b)=>b.value-a.value).slice(0,n||15);
+}
+function orderFrequency(n, rows){
+  rows=rows||filteredRows();
+  if(!hasRole("supplier")||!hasRole("document_no")) return [];
+  const roll=d3.rollups(rows, v=>({o:new Set(v.map(r=>val(r,"document_no")).filter(Boolean)).size, s:d3.sum(v,amt)}), r=>val(r,"supplier")||"(leer)");
+  return roll.map(([key,o])=>({key,value:o.o,
+      tip:`<b>${escHtml(key)}</b><br>${fmtNumber(o.o)} Bestellungen<br>${fmtCurrency(o.s)} · Ø ${fmtCurrency(o.o?o.s/o.o:0)}/Beleg<br><span class="tip-hint">Klick zum Filtern</span>`}))
+    .filter(d=>d.key!=="(leer)").sort((a,b)=>b.value-a.value).slice(0,n||30);
+}
+function isService(r){ const c=val(r,"classification"); return !!(c&&/dienst|service|leistung/i.test(c)); }
+function serviceTopSuppliers(n, rows){
+  rows=rows||filteredRows();
+  if(!hasRole("supplier")||!hasRole("classification")) return [];
+  return dimSeries(rows.filter(isService),"supplier",n||30);
+}
+function poSizeBuckets(rows){
+  rows=rows||filteredRows();
+  if(!hasRole("document_no")) return {bands:[],smallShareCount:0,total:0};
+  const valueRole=hasRole("order_value")?"order_value":"amount";
+  const byPo=d3.rollups(rows, v=>d3.sum(v,r=>val(r,valueRole)||0), r=>val(r,"document_no")||"(leer)");
+  const defs=[["< 1k",0,1000],["1–5k",1000,5000],["5–10k",5000,10000],["10–50k",10000,50000],["> 50k",50000,Infinity]];
+  const bands=defs.map(d=>({key:d[0],value:0,lo:d[1],hi:d[2]}));
+  let small=0,tot=0;
+  for(const [,v] of byPo){ const b=bands.find(c=>v>=c.lo&&v<c.hi); if(b)b.value++; tot++; if(v<10000)small++; }
+  bands.forEach(b=>b.tip=`<b>${b.key} €</b><br>${fmtNumber(b.value)} Belege · ${fmtPct(tot?b.value/tot:0)}`);
+  return {bands:bands.map(b=>({key:b.key,value:b.value,tip:b.tip})), smallShareCount:tot?small/tot:0, total:tot};
+}
+function priceDispersionMaterials(rows){
+  if(!hasRole("unit_price")||!hasRole("material_text")) return [];
+  const map=new Map();
+  for(const r of rows){ const t=val(r,"material_text"); const p=val(r,"unit_price");
+    if(!t||p==null||p<=0) continue; (map.get(t)||map.set(t,[]).get(t)).push(p); }
+  const out=[];
+  for(const [t,ps] of map){ if(ps.length<2) continue;
+    const mn=Math.min(...ps),mx=Math.max(...ps),mean=ps.reduce((a,b)=>a+b,0)/ps.length;
+    if(mean<=0) continue; out.push({key:t,value:(mx-mn)/mean,min:mn,max:mx,avg:mean,n:ps.length}); }
+  return out.sort((a,b)=>b.value-a.value);
+}
+function priceDispersionByGroup(topGroups, rows){
+  rows=rows||filteredRows();
+  if(!hasRole("unit_price")||!hasRole("material_text")||!hasRole("category")) return [];
+  const topG=new Set(topItems("category",topGroups||10).map(d=>d.key));
+  const byGroup=new Map();
+  for(const r of rows){ const g=val(r,"category"); if(!g||!topG.has(g)) continue;
+    (byGroup.get(g)||byGroup.set(g,[]).get(g)).push(r); }
+  const out=[];
+  for(const [g,rs] of byGroup){ const mats=priceDispersionMaterials(rs);
+    if(!mats.length) continue;
+    const avg=mats.reduce((s,d)=>s+d.value,0)/mats.length;
+    const worst=mats[0];
+    out.push({key:g, value:avg, n:mats.length,
+      tip:`<b>${escHtml(g)}</b><br>Ø Streuung ${fmtPct(avg)}<br>${fmtNumber(mats.length)} Materialien (≥2 Preise)<br>Top: ${escHtml(worst.key)} ${fmtPct(worst.value)} (${fmtCurrency(worst.min)}–${fmtCurrency(worst.max)})<br><span class="tip-hint">Klick zum Filtern</span>`}); }
+  return out.sort((a,b)=>b.value-a.value);
+}
+function multiSupplierByGroup(topGroups, rows){
+  rows=rows||filteredRows();
+  if(!hasRole("category")||!hasRole("material_text")||!hasRole("supplier")) return [];
+  const topG=new Set(topItems("category",topGroups||10).map(d=>d.key));
+  const matMap=new Map();
+  for(const r of rows){ const g=val(r,"category"); if(!g||!topG.has(g)) continue;
+    const t=val(r,"material_text"); const s=val(r,"supplier"); if(!t||!s) continue;
+    const k=g+"||"+t; (matMap.get(k)||matMap.set(k,new Set()).get(k)).add(s); }
+  const agg=new Map();
+  for(const [k,set] of matMap){ const g=k.split("||")[0]; const a=agg.get(g)||agg.set(g,{mats:0,multi:0,sum:0,max:0}).get(g);
+    a.mats++; a.sum+=set.size; if(set.size>1)a.multi++; if(set.size>a.max)a.max=set.size; }
+  return [...agg].map(([key,a])=>({key, materials:a.mats, avg:a.mats?a.sum/a.mats:0, multiPct:a.mats?a.multi/a.mats:0, max:a.max}))
+    .sort((x,y)=>y.avg-x.avg);
+}
+function spendMatrix(rowRole, colRole, topRows, topCols, rows){
+  rows=rows||filteredRows();
+  if(!hasRole(rowRole)||!hasRole(colRole)) return null;
+  const rk=topItems(rowRole,topRows||12).map(d=>d.key);
+  const ck=topItems(colRole,topCols||10).map(d=>d.key);
+  const map=new Map();
+  for(const r of rows){ const a=val(r,rowRole),b=val(r,colRole); if(a==null||b==null) continue;
+    const k=a+"||"+b; map.set(k,(map.get(k)||0)+amt(r)); }
+  return {rk,ck,get:(a,b)=>map.get(a+"||"+b)||0};
+}
+function onTimeFor(rows){
+  if(!hasRole("delivery_date")||!hasRole("plan_delivery_date")) return null;
+  const defs=[["> 7 Tg. früh"],["1–7 Tg. früh"],["pünktlich"],["1–7 Tg. spät"],["> 7 Tg. spät"]];
+  const bands=defs.map(d=>({key:d[0],value:0}));
+  let n=0,onTime=0,sumDiff=0;
+  for(const r of rows){ const a=val(r,"delivery_date"),p=val(r,"plan_delivery_date"); if(!a||!p) continue;
+    const diff=Math.round((a-p)/86400000); n++; sumDiff+=diff; if(diff<=0)onTime++;
+    if(diff<-7)bands[0].value++; else if(diff<0)bands[1].value++; else if(diff===0)bands[2].value++; else if(diff<=7)bands[3].value++; else bands[4].value++; }
+  bands.forEach(b=>b.tip=`<b>${b.key}</b><br>${fmtNumber(b.value)} Positionen · ${fmtPct(n?b.value/n:0)}`);
+  return {bands, n, onTimeRate:n?onTime/n:0, avgDiff:n?sumDiff/n:0};
+}
+function onTimeBuckets(){ return onTimeFor(filteredRows()); }
+
+/* ---------- KPI / card scaffolding ---------- */
+function kpiStrip(kpis){
+  return `<div class="kpi-strip">${kpis.map(k=>`
+    <div class="kpi"><div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div><div class="kpi-meta">${k.meta||""}</div></div>`).join("")}</div>`;
+}
+function cardHTML(id, num, title, sub, heur){
+  return `<div class="card"><div class="card-head"><div>
+    <h3 class="card-title">${num?`<span class="anum">#${num}</span>`:""}${escHtml(title)}${heur?'<span class="heur" title="Heuristik ohne KI-Textaufbereitung">≈ Heuristik</span>':""}</h3>
+    <div class="card-sub">${escHtml(sub||"")}</div></div></div>
+    <div class="chart-host" id="${id}"></div></div>`;
+}
+
+/* ---------- chart primitives (clickable + rich tooltips) ---------- */
+function clickGuard(key){ return key!=="Sonstige"&&key!=="(leer)"; }
+function barH(host, data, opts){
+  opts=opts||{}; if(!data||!data.length){ noData(host,opts.empty); return; }
+  const fmt=opts.fmt||fmtCurrency, abbr=opts.abbr||fmtAbbrev, fr=opts.filterRole, sel=fr?State.filters[fr]:null;
+  const h=opts.height||Math.max(170,data.length*26+38);
+  const {g,innerW,innerH}=makeSvg(host,h,{top:8,right:26,bottom:30,left:opts.left||180});
+  const x=d3.scaleLinear().domain([0,d3.max(data,d=>d.value)||1]).nice().range([0,innerW]);
+  const y=d3.scaleBand().domain(data.map(d=>d.key)).range([0,innerH]).padding(.2);
+  g.append("g").attr("class","gridline").call(d3.axisBottom(x).ticks(5).tickSize(innerH).tickFormat(""));
+  const bars=g.selectAll(".bar").data(data).join("rect").attr("class","bar")
+    .attr("x",0).attr("y",d=>y(d.key)).attr("height",y.bandwidth()).attr("rx",4)
+    .attr("fill",(d,i)=>d.color||opts.color||kpmgColor(i))
+    .attr("opacity",d=>sel!=null&&String(sel)!==String(d.key)?0.3:1).attr("width",0)
+    .on("mousemove",(e,d)=>showTip(d.tip||`<b>${escHtml(d.key)}</b><br>${fmt(d.value)}`,e)).on("mouseleave",hideTip);
+  if(fr) bars.style("cursor","pointer").on("click",(e,d)=>{ if(clickGuard(d.key)) applyFilter(fr,d.key); });
+  bars.transition().duration(600).attr("width",d=>x(d.value));
+  const ya=g.append("g").attr("class","axis").call(d3.axisLeft(y).tickSize(0)); ya.select(".domain").remove();
+  ya.selectAll("text").each(function(){const t=d3.select(this);const s=t.text();if(s.length>26){t.text(s.slice(0,25)+"…");t.append("title").text(s);}});
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).ticks(5).tickFormat(abbr));
+}
+function barV(host, data, opts){
+  opts=opts||{}; if(!data||!data.length){ noData(host,opts.empty); return; }
+  const fmt=opts.fmt||fmtCurrency, abbr=opts.abbr||fmtAbbrev, fr=opts.filterRole, sel=fr?State.filters[fr]:null;
+  const {g,innerW,innerH}=makeSvg(host,opts.height||340,{top:12,right:16,bottom:opts.bottom||96,left:64});
+  const x=d3.scaleBand().domain(data.map(d=>d.key)).range([0,innerW]).padding(.22);
+  const y=d3.scaleLinear().domain([0,d3.max(data,d=>d.value)||1]).nice().range([innerH,0]);
+  g.append("g").attr("class","gridline").call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(""));
+  const bars=g.selectAll(".bar").data(data).join("rect").attr("class","bar")
+    .attr("x",d=>x(d.key)).attr("width",x.bandwidth()).attr("rx",4).attr("y",innerH).attr("height",0)
+    .attr("fill",(d,i)=>d.color||opts.color||kpmgColor(i))
+    .attr("opacity",d=>sel!=null&&String(sel)!==String(d.key)?0.3:1)
+    .on("mousemove",(e,d)=>showTip(d.tip||`<b>${escHtml(d.key)}</b><br>${fmt(d.value)}`,e)).on("mouseleave",hideTip);
+  if(fr) bars.style("cursor","pointer").on("click",(e,d)=>{ if(clickGuard(d.key)) applyFilter(fr,d.key); });
+  bars.transition().duration(600).attr("y",d=>y(d.value)).attr("height",d=>innerH-y(d.value));
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).tickSize(0))
+    .selectAll("text").attr("transform","rotate(-40)").style("text-anchor","end")
+    .each(function(){const t=d3.select(this);const s=t.text();if(s.length>20)t.text(s.slice(0,19)+"…");});
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(5).tickFormat(abbr));
+}
+function waterfall(host, data, opts){
+  opts=opts||{}; if(!data||!data.length){ noData(host,opts.empty); return; }
+  let cum=0; const total0=d3.sum(data,d=>d.value);
+  const steps=data.map(d=>{const start=cum;cum+=d.value;return {key:d.key,start,end:cum,value:d.value,share:total0?d.value/total0:0,tip:d.tip};});
+  const total=cum, fr=opts.filterRole;
+  const {g,innerW,innerH}=makeSvg(host,opts.height||360,{top:12,right:16,bottom:104,left:64});
+  const x=d3.scaleBand().domain(steps.map(d=>d.key).concat(["Gesamt"])).range([0,innerW]).padding(.22);
+  const y=d3.scaleLinear().domain([0,total]).nice().range([innerH,0]);
+  g.append("g").attr("class","gridline").call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(""));
+  const bars=g.selectAll(".bar").data(steps).join("rect").attr("class","bar").attr("rx",3)
+    .attr("x",d=>x(d.key)).attr("width",x.bandwidth()).attr("y",d=>y(d.end)).attr("height",d=>y(d.start)-y(d.end))
+    .attr("fill",(d,i)=>kpmgColor(i))
+    .on("mousemove",(e,d)=>showTip(d.tip||`<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.value)} · ${fmtPct(d.share)}<br>kumuliert ${fmtCurrency(d.end)}`,e)).on("mouseleave",hideTip);
+  if(fr) bars.style("cursor","pointer").on("click",(e,d)=>{ if(clickGuard(d.key)) applyFilter(fr,d.key); });
+  g.append("rect").attr("class","bar").attr("rx",3).attr("x",x("Gesamt")).attr("width",x.bandwidth())
+    .attr("y",y(total)).attr("height",innerH-y(total)).attr("fill",cssVar("--kpmg-blue")||"#00338D")
+    .on("mousemove",e=>showTip(`<b>Gesamt</b><br>${fmtCurrency(total)}`,e)).on("mouseleave",hideTip);
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).tickSize(0))
+    .selectAll("text").attr("transform","rotate(-40)").style("text-anchor","end")
+    .each(function(){const t=d3.select(this);const s=t.text();if(s.length>20)t.text(s.slice(0,19)+"…");});
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(5).tickFormat(fmtAbbrev));
+}
+function donut(host, data, opts){
+  opts=opts||{}; if(!data||!data.length){ noData(host,opts.empty); return; }
+  const total=d3.sum(data,d=>d.value); const h=opts.height||300; const fr=opts.filterRole, sel=fr?State.filters[fr]:null; host.innerHTML="";
+  const width=Math.max(280, host.clientWidth||host.parentElement.clientWidth||500);
+  const r=Math.min(width,h)/2-10;
+  const svg=d3.select(host).append("svg").attr("width","100%").attr("height",h).attr("viewBox",`0 0 ${width} ${h}`);
+  const g=svg.append("g").attr("transform",`translate(${width/2},${h/2})`);
+  const pie=d3.pie().value(d=>d.value).sort(null), arc=d3.arc().innerRadius(r*0.62).outerRadius(r);
+  const paths=g.selectAll("path").data(pie(data)).join("path").attr("d",arc)
+    .attr("fill",(d,i)=>d.data.color||kpmgColor(i)).attr("stroke",cssVar("--surface")||"#fff").attr("stroke-width",2)
+    .attr("opacity",d=>sel!=null&&String(sel)!==String(d.data.key)?0.35:1)
+    .on("mousemove",(e,d)=>showTip(d.data.tip||`<b>${escHtml(d.data.key)}</b><br>${fmtCurrency(d.data.value)} · ${fmtPct(d.data.value/total)}`,e)).on("mouseleave",hideTip);
+  if(fr) paths.style("cursor","pointer").on("click",(e,d)=>{ if(clickGuard(d.data.key)) applyFilter(fr,d.data.key); });
+  g.append("text").attr("text-anchor","middle").attr("dy","-0.1em").attr("fill",cssVar("--text")).style("font-size","20px").style("font-weight","800").text(fmtAbbrev(total));
+  g.append("text").attr("text-anchor","middle").attr("dy","1.5em").attr("fill",cssVar("--text-muted")).style("font-size","12px").text(opts.centerLabel||"Gesamt");
+  legend(host, data.map((d,i)=>({label:`${d.key} (${fmtPct(d.value/total)})`,color:d.color||kpmgColor(i)})));
+}
+function abcCurve(host, items, opts){
+  opts=opts||{}; const data=abcClassify(items); if(!data.length){ noData(host,opts.empty); return; }
+  const fr=opts.filterRole, colors={A:cssVar("--kpmg-blue")||"#00338D",B:cssVar("--kpmg-light-blue")||"#0091DA",C:cssVar("--kpmg-teal")||"#00A3A1"};
+  const {g,innerW,innerH}=makeSvg(host,opts.height||340,{top:14,right:52,bottom:34,left:64});
+  const x=d3.scaleBand().domain(data.map(d=>d.idx)).range([0,innerW]).padding(.06);
+  const y=d3.scaleLinear().domain([0,d3.max(data,d=>d.value)||1]).nice().range([innerH,0]);
+  const y2=d3.scaleLinear().domain([0,1]).range([innerH,0]);
+  g.append("g").attr("class","gridline").call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(""));
+  const bars=g.selectAll(".bar").data(data).join("rect").attr("class","bar")
+    .attr("x",d=>x(d.idx)).attr("width",x.bandwidth()).attr("y",d=>y(d.value)).attr("height",d=>innerH-y(d.value)).attr("fill",d=>colors[d.cls])
+    .on("mousemove",(e,d)=>showTip(`<b>#${d.idx} ${escHtml(d.key)}</b><br>${fmtCurrency(d.value)}<br>Klasse ${d.cls} · kum. ${fmtPct(d.cumPct)}`+(fr?`<br><span class="tip-hint">Klick zum Filtern</span>`:""),e)).on("mouseleave",hideTip);
+  if(fr) bars.style("cursor","pointer").on("click",(e,d)=>{ if(clickGuard(d.key)) applyFilter(fr,d.key); });
+  const line=d3.line().x(d=>x(d.idx)+x.bandwidth()/2).y(d=>y2(d.cumPct)).curve(d3.curveMonotoneX);
+  g.append("path").datum(data).attr("fill","none").attr("stroke",cssVar("--kpmg-purple")||"#483698").attr("stroke-width",2.5).attr("d",line);
+  [0.8,0.95].forEach(p=>g.append("line").attr("x1",0).attr("x2",innerW).attr("y1",y2(p)).attr("y2",y2(p)).attr("stroke",cssVar("--text-faint")).attr("stroke-dasharray","4 3").attr("opacity",.55));
+  const step=Math.ceil(data.length/12);
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).tickValues(x.domain().filter((d,i)=>!(i%step))));
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(5).tickFormat(fmtAbbrev));
+  g.append("g").attr("class","axis").attr("transform",`translate(${innerW},0)`).call(d3.axisRight(y2).ticks(5).tickFormat(d3.format(".0%")));
+  const c={A:data.filter(d=>d.cls==="A").length,B:data.filter(d=>d.cls==="B").length,C:data.filter(d=>d.cls==="C").length};
+  legend(host,[{label:`A · 80% (${c.A})`,color:colors.A},{label:`B · 15% (${c.B})`,color:colors.B},{label:`C · 5% (${c.C})`,color:colors.C},{label:"kumulativ %",color:cssVar("--kpmg-purple")}]);
+}
+function heatmap(host, m, opts){
+  opts=opts||{}; if(!m||!m.rk.length||!m.ck.length){ noData(host,opts.empty); return; }
+  const cells=[]; let maxV=0;
+  m.rk.forEach(r=>m.ck.forEach(c=>{const v=m.get(r,c); if(v>maxV)maxV=v; cells.push({r,c,v});}));
+  const grand=d3.sum(cells,d=>d.v)||1;
+  const h=opts.height||Math.max(200, m.rk.length*30+104);
+  const {g,innerW,innerH}=makeSvg(host,h,{top:8,right:14,bottom:104,left:opts.left||170});
+  const x=d3.scaleBand().domain(m.ck).range([0,innerW]).padding(.05);
+  const y=d3.scaleBand().domain(m.rk).range([0,innerH]).padding(.05);
+  const color=d3.scaleLinear().domain([0,maxV||1]).range(["#dce6f7","#00338D"]);
+  const cl=g.selectAll("rect").data(cells).join("rect")
+    .attr("x",d=>x(d.c)).attr("y",d=>y(d.r)).attr("width",x.bandwidth()).attr("height",y.bandwidth()).attr("rx",3)
+    .attr("fill",d=>d.v?color(d.v):"var(--surface-2)").attr("stroke",cssVar("--border"))
+    .on("mousemove",(e,d)=>showTip(`<b>${escHtml(d.r)}</b><br>${escHtml(d.c)}<br>${(opts.fmt||fmtCurrency)(d.v)} · ${fmtPct(d.v/grand)}`+((opts.rowRole&&opts.colRole)?`<br><span class="tip-hint">Klick zum Filtern</span>`:""),e)).on("mouseleave",hideTip);
+  if(opts.rowRole&&opts.colRole) cl.style("cursor","pointer").on("click",(e,d)=>{ if(d.v) applyFilters({[opts.rowRole]:d.r,[opts.colRole]:d.c}); });
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).tickSize(0))
+    .selectAll("text").attr("transform","rotate(-40)").style("text-anchor","end").each(function(){const t=d3.select(this);const s=t.text();if(s.length>16)t.text(s.slice(0,15)+"…");});
+  const ya=g.append("g").attr("class","axis").call(d3.axisLeft(y).tickSize(0)); ya.select(".domain").remove();
+  ya.selectAll("text").each(function(){const t=d3.select(this);const s=t.text();if(s.length>22)t.text(s.slice(0,21)+"…");});
+}
+function table(host, columns, rows, opts){
+  opts=opts||{}; if(!rows||!rows.length){ noData(host,opts.empty); return; }
+  const thead=`<tr>${columns.map(c=>`<th style="${c.num?'text-align:right':''}">${escHtml(c.label)}</th>`).join("")}</tr>`;
+  const body=rows.map(r=>`<tr>${columns.map(c=>`<td style="${c.num?'text-align:right':''}">${c.render(r)}</td>`).join("")}</tr>`).join("");
+  host.innerHTML=`<div class="tbl-wrap"><table class="data-table"><thead>${thead}</thead><tbody>${body}</tbody></table></div>`;
+}
+function drawTimeArea(host, rows, opts){
+  opts=opts||{}; if(!hasRole("date")){ noData(host,"Spalte „Belegdatum“ zuordnen."); return; }
+  rows=(rows||filteredRows()).filter(r=>val(r,"date"));
+  const byMonth=d3.rollups(rows, v=>v, r=>d3.timeMonth(val(r,"date")).getTime());
+  let data=byMonth.map(([t,vs])=>({date:new Date(t),value:d3.sum(vs,amt),vs})).sort((a,b)=>a.date-b.date);
+  if(data.length<2){ noData(host,"Mindestens zwei Monate erforderlich."); return; }
+  const total=d3.sum(data,d=>d.value);
+  data.forEach((d,i)=>{ d.mom=i>0&&data[i-1].value?(d.value-data[i-1].value)/data[i-1].value:null;
+    if(hasRole("category")){ const tc=rollup(d.vs,"category",amt,1); d.top=tc[0]?tc[0].key:null; } });
+  const {g,innerW,innerH}=makeSvg(host,opts.height||320,{top:14,right:24,bottom:34,left:64});
+  const x=d3.scaleTime().domain(d3.extent(data,d=>d.date)).range([0,innerW]);
+  const y=d3.scaleLinear().domain([0,d3.max(data,d=>d.value)||1]).nice().range([innerH,0]);
+  g.append("g").attr("class","gridline").call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(""));
+  const area=d3.area().x(d=>x(d.date)).y0(innerH).y1(d=>y(d.value)).curve(d3.curveMonotoneX);
+  const line=d3.line().x(d=>x(d.date)).y(d=>y(d.value)).curve(d3.curveMonotoneX);
+  const grad=g.append("defs").append("linearGradient").attr("id","areaGrad-"+host.id).attr("x1",0).attr("y1",0).attr("x2",0).attr("y2",1);
+  grad.append("stop").attr("offset","0%").attr("stop-color",cssVar("--kpmg-light-blue")).attr("stop-opacity",.45);
+  grad.append("stop").attr("offset","100%").attr("stop-color",cssVar("--kpmg-light-blue")).attr("stop-opacity",.02);
+  g.append("path").datum(data).attr("fill",`url(#areaGrad-${host.id})`).attr("d",area);
+  g.append("path").datum(data).attr("fill","none").attr("stroke",cssVar("--kpmg-blue")||"#00338D").attr("stroke-width",2.5).attr("d",line);
+  const pts=g.selectAll(".pt").data(data).join("circle").attr("class","pt").attr("cx",d=>x(d.date)).attr("cy",d=>y(d.value)).attr("r",3.4).attr("fill",cssVar("--kpmg-blue")||"#00338D")
+    .on("mousemove",(e,d)=>showTip(`<b>${d3.timeFormat("%B %Y")(d.date)}</b><br>${fmtCurrency(d.value)} · ${fmtPct(total?d.value/total:0)}`
+      +(d.mom!=null?`<br>${d.mom>=0?"▲":"▼"} ${fmtPct(Math.abs(d.mom))} ggü. Vormonat`:"")
+      +(d.top?`<br>Top-WG: ${escHtml(d.top)}`:"")+(!opts.noFilter?`<br><span class="tip-hint">Klick zum Filtern</span>`:""),e)).on("mouseleave",hideTip);
+  if(!opts.noFilter) pts.style("cursor","pointer").on("click",(e,d)=>applyFilter("__month",d.date.getTime()));
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).ticks(Math.min(8,data.length)).tickFormat(d3.timeFormat("%b '%y")));
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(5).tickFormat(fmtAbbrev));
+}
+
+/* ======================= DASHBOARD PAGES ============================= */
+
+registerDashboard({
+  id:"overview", title:"Übersicht", group:"Analysen",
+  subtitle:"Headline-Kennzahlen und Spend-Struktur.", needs:["amount"],
+  render(root){
+    const rows=filteredRows(); const total=sumAmt(rows);
+    const suppliers=distinct(rows,"supplier"); const pos=distinct(rows,"document_no");
+    const dates=hasRole("date")?rows.map(r=>val(r,"date")).filter(Boolean):[];
+    const [d0,d1]=dates.length?d3.extent(dates):[null,null]; const fmtD=d3.timeFormat("%b %Y");
+    root.innerHTML=kpiStrip([
+      {label:"Gesamt-Spend (#1)", value:fmtCurrency(total), meta:"erf. Rechnungsbetrag"},
+      {label:"Lieferanten", value:suppliers!=null?fmtNumber(suppliers):"—", meta:"eindeutig"},
+      {label:"Bestellungen", value:pos!=null?fmtNumber(pos):fmtNumber(rows.length), meta:pos!=null?"Einkaufsbelege":"Positionen"},
+      {label:"Ø Bestellwert", value:fmtCurrency(pos?total/pos:(rows.length?total/rows.length:0)), meta:pos?"je Beleg":"je Position"},
+      {label:"Zeitraum", value:d0?fmtD(d0):"—", meta:d1?("bis "+fmtD(d1)):"—"},
+    ])+`<div class="grid grid-2">
+      ${cardHTML("ov-time",10,"Kostenentwicklung über Zeit","Monatlicher Spend-Verlauf — Klick filtert auf Monat")}
+      ${cardHTML("ov-ms",11,"Material vs. Dienstleistung","Struktur der Ausgaben (Make-or-Buy)")}
+    </div>`;
+    drawTimeArea(byId("ov-time"));
+    donut(byId("ov-ms"), dimSeries(filteredRowsExcept("classification"),"classification"), {filterRole:"classification", empty:"Spalte „Kategorisierung“ zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"structure", title:"Spend-Struktur", group:"Analysen",
+  subtitle:"Verteilung nach Warengruppen und Organisation.", needs:["amount"],
+  render(root){
+    root.innerHTML=`
+      <div class="grid">${cardHTML("st-wf",2,"Spend nach Warengruppe","Beitrag je Warengruppe — Klick filtert")}</div>
+      <div class="grid grid-2" style="margin-top:20px">
+        ${cardHTML("st-top",3,"Top-10 Warengruppen","Größte Kostentreiber")}
+        ${cardHTML("st-org",13,"Spend je Einkaufsorganisation","Vergleich der Einkaufsorganisationen")}
+      </div>
+      <div class="grid grid-2" style="margin-top:20px">
+        ${cardHTML("st-pg",19,"Spend je Einkäufergruppe","Governance & Steuerung")}
+        ${cardHTML("st-ms",11,"Material vs. Dienstleistung","Struktur der Ausgaben")}
+      </div>
+      <div class="grid" style="margin-top:20px">${cardHTML("st-mx",14,"Warengruppe je Einkaufsorganisation","Cross-Site-Synergien — Zelle anklicken zum Filtern")}</div>`;
+    waterfall(byId("st-wf"), dimSeries(filteredRowsExcept("category"),"category",12,true), {filterRole:"category", empty:"Spalte „Warengruppenbez.“ zuordnen."});
+    barH(byId("st-top"), dimSeries(filteredRowsExcept("category"),"category",10), {filterRole:"category", empty:"Warengruppe zuordnen."});
+    barV(byId("st-org"), dimSeries(filteredRowsExcept("purchasing_org"),"purchasing_org",12), {filterRole:"purchasing_org", empty:"Spalte „EinkOrganisation“ zuordnen."});
+    barV(byId("st-pg"), dimSeries(filteredRowsExcept("purchasing_group"),"purchasing_group",12), {filterRole:"purchasing_group", empty:"Spalte „Einkäufergruppe“ zuordnen."});
+    donut(byId("st-ms"), dimSeries(filteredRowsExcept("classification"),"classification"), {filterRole:"classification", empty:"Kategorisierung zuordnen."});
+    heatmap(byId("st-mx"), spendMatrix("category","purchasing_org",12,10), {rowRole:"category", colRole:"purchasing_org", empty:"Warengruppe + EinkOrganisation zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"suppliers", title:"Lieferanten", group:"Analysen",
+  subtitle:"Konzentration, Bündelung und Performance der Lieferantenbasis.", needs:["amount","supplier"],
+  render(root){
+    root.innerHTML=`
+      <div class="grid">${cardHTML("sp-top",4,"Top-30 Lieferanten","Größte Lieferanten — Klick filtert / öffnet Lieferant 360 via Chip")}</div>
+      <div class="grid grid-2" style="margin-top:20px">
+        ${cardHTML("sp-abc",5,"ABC-Analyse Lieferanten","A: 80% · B: 15% · C: 5% des Spends")}
+        ${cardHTML("sp-freq",16,"Bestellhäufigkeit Top-30","Anzahl Einkaufsbelege je Lieferant")}
+      </div>
+      <div class="grid grid-2" style="margin-top:20px">
+        ${cardHTML("sp-svc",12,"Servicekosten Top-30-Lieferanten","Dienstleistungs-Spend je Lieferant")}
+        ${cardHTML("sp-oem",20,"Hersteller-Spend","OEM-Abhängigkeiten & Alternativen")}
+      </div>
+      <div class="grid" style="margin-top:20px">${cardHTML("sp-bndl",6,"Lieferantenbündelung je Warengruppe","Anzahl Lieferanten je Warengruppe")}</div>`;
+    barH(byId("sp-top"), dimSeries(filteredRowsExcept("supplier"),"supplier",30), {filterRole:"supplier", height:760});
+    abcCurve(byId("sp-abc"), rollup(filteredRowsExcept("supplier"),"supplier",amt), {filterRole:"supplier"});
+    barH(byId("sp-freq"), orderFrequency(30, filteredRowsExcept("supplier")), {fmt:fmtNumber, abbr:fmtNumber, color:cssVar("--kpmg-medium-blue"), filterRole:"supplier", empty:"Spalte „Einkaufsbeleg“ zuordnen."});
+    barH(byId("sp-svc"), serviceTopSuppliers(30, filteredRowsExcept("supplier")), {filterRole:"supplier", empty:"Spalte „Kategorisierung“ zuordnen."});
+    barH(byId("sp-oem"), dimSeries(filteredRowsExcept("manufacturer"),"manufacturer",20), {filterRole:"manufacturer", empty:"Spalte „Hersteller“ zuordnen."});
+    barH(byId("sp-bndl"), distinctSupplierByGroup(15, filteredRowsExcept("category")), {fmt:fmtNumber, abbr:fmtNumber, color:cssVar("--kpmg-teal"), filterRole:"category", empty:"Warengruppe zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"materials", title:"Material & Preise", group:"Analysen",
+  subtitle:"Materialwerte, Bestellgrößen und Preisstreuung.", needs:["amount"],
+  render(root){
+    const po=poSizeBuckets();
+    root.innerHTML=`
+      <div class="grid grid-2">
+        ${cardHTML("mt-abc",18,"ABC-Analyse Materialien","Wertbasierte Klassifizierung der Materialien")}
+        ${cardHTML("mt-small",17,"Kleinbestellungen (C-Teile)","Verteilung der Bestellwerte je Beleg"+(po.total?` · ${fmtPct(po.smallShareCount)} < 10 TEUR`:""))}
+      </div>
+      <div class="grid" style="margin-top:20px">${cardHTML("mt-disp",8,"Durchschnittliche Preisstreuung (Top-10 WG)","Ø (Max−Min)/Mittel gleicher Materialien — Klick filtert WG",true)}</div>
+      <div class="grid" style="margin-top:20px">${cardHTML("mt-multi",7,"Mehrfachlieferanten je Material (Top-10 WG)","Ø Lieferanten je gleichem Material",true)}</div>`;
+    abcCurve(byId("mt-abc"), rollup(filteredRowsExcept("material"),"material",amt), {filterRole:"material", empty:"Spalte „Material“ zuordnen."});
+    barV(byId("mt-small"), po.bands, {fmt:fmtNumber, abbr:fmtNumber, bottom:40, color:cssVar("--kpmg-medium-blue"), empty:"Spalte „Einkaufsbeleg“ zuordnen."});
+    barH(byId("mt-disp"), priceDispersionByGroup(10, filteredRowsExcept("category")), {fmt:fmtPct, abbr:v=>fmtPct(v), color:cssVar("--kpmg-purple"), filterRole:"category", empty:"Nettopreis + Kurztext + Warengruppe zuordnen."});
+    table(byId("mt-multi"), [
+      {label:"Warengruppe", render:r=>escHtml(r.key)},
+      {label:"# Materialien", num:true, render:r=>fmtNumber(r.materials)},
+      {label:"Ø Lieferanten/Material", num:true, render:r=>r.avg.toFixed(2)},
+      {label:"% mit Mehrfach", num:true, render:r=>fmtPct(r.multiPct)},
+      {label:"Max", num:true, render:r=>fmtNumber(r.max)},
+    ], multiSupplierByGroup(10), {empty:"Kurztext + Lieferant + Warengruppe zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"performance", title:"Performance", group:"Analysen",
+  subtitle:"Lieferanten-Performance.", needs:["delivery_date","plan_delivery_date"],
+  render(root){
+    const ot=onTimeBuckets();
+    root.innerHTML=kpiStrip([
+      {label:"Liefertermintreue (#15)", value:ot?fmtPct(ot.onTimeRate):"—", meta:"Lieferung ≤ Plantermin"},
+      {label:"Ø Abweichung", value:ot?(ot.avgDiff>=0?"+":"")+ot.avgDiff.toFixed(1)+" Tg.":"—", meta:"Ist vs. Plan"},
+      {label:"Bewertete Positionen", value:ot?fmtNumber(ot.n):"—", meta:"mit Plan- & Ist-Datum"},
+    ])+`<div class="grid">${cardHTML("pf-ot",15,"Liefertermintreue","Abweichung Ist- vs. Plan-Lieferdatum (Tage)")}</div>`;
+    barV(byId("pf-ot"), ot?ot.bands:[], {fmt:fmtNumber, abbr:fmtNumber, bottom:40, empty:"Lieferdatum + Stat.Lieferdatum zuordnen."});
+  }
+});
+
+/* ---------- 360° drill-through pages ---------- */
+function entityPicker(id, label, options, selected){
+  return `<div class="sel-360"><label>${escHtml(label)}</label>
+    <select id="${id}">${options.map(o=>`<option value="${escAttr(o.key)}" ${o.key===selected?"selected":""}>${escHtml(o.key)} — ${fmtAbbrev(o.value)}</option>`).join("")}</select></div>`;
+}
+
+registerDashboard({
+  id:"supplier360", title:"Lieferant 360°", group:"Drilldown",
+  subtitle:"Tiefenanalyse eines einzelnen Lieferanten.", needs:["amount","supplier"],
+  render(root){
+    const all=dimStats(State.rows,"supplier").items.filter(d=>d.key!=="(leer)"&&!d.isOther);
+    if(!all.length){ root.innerHTML='<div class="placeholder-dash"><h3>Keine Lieferantendaten</h3></div>'; return; }
+    let sel=State.sel360s; if(!all.some(d=>d.key===sel)) sel=null;
+    if(!sel&&State.filters.supplier&&all.some(d=>d.key===State.filters.supplier)) sel=State.filters.supplier;
+    if(!sel) sel=all[0].key; State.sel360s=sel;
+    const meta=all.find(d=>d.key===sel); const rows=State.rows.filter(r=>String(val(r,"supplier"))===String(sel));
+    const ot=onTimeFor(rows);
+    root.innerHTML=entityPicker("s360","Lieferant",all.slice(0,400),sel)+kpiStrip([
+      {label:"Spend", value:fmtCurrency(meta.value), meta:`Rang #${meta.rank} · ${fmtPct(meta.share)} gesamt`},
+      {label:"Bestellungen", value:meta.orders!=null?fmtNumber(meta.orders):"—", meta:"Einkaufsbelege"},
+      {label:"Warengruppen", value:distinct(rows,"category")!=null?fmtNumber(distinct(rows,"category")):"—", meta:"bedient"},
+      {label:"Ø Bestellwert", value:meta.orders?fmtCurrency(meta.value/meta.orders):"—", meta:"je Beleg"},
+      {label:"Termintreue", value:ot?fmtPct(ot.onTimeRate):"—", meta:ot?fmtNumber(ot.n)+" Pos.":"—"},
+    ])+`<div class="grid grid-2">
+      ${cardHTML("s3-cat",null,"Warengruppen-Mix","Spend je Warengruppe bei diesem Lieferanten")}
+      ${cardHTML("s3-time",null,"Verlauf","Monatlicher Spend")}
+    </div>
+    <div class="grid grid-2" style="margin-top:20px">
+      ${cardHTML("s3-ot",null,"Liefertermintreue","Abweichung Ist vs. Plan (Tage)")}
+      ${cardHTML("s3-mat",null,"Top-Materialien","Größte Materialpositionen")}
+    </div>`;
+    byId("s360").onchange=e=>{ State.sel360s=e.target.value; renderView(); };
+    barH(byId("s3-cat"), dimSeries(rows,"category",10), {empty:"Warengruppe zuordnen."});
+    drawTimeArea(byId("s3-time"), rows, {noFilter:true});
+    barV(byId("s3-ot"), ot?ot.bands:[], {fmt:fmtNumber, abbr:fmtNumber, bottom:40, empty:"Lieferdaten zuordnen."});
+    const mats=hasRole("material_text")?rollup(rows,"material_text",amt,12).filter(d=>d.key!=="(leer)"):[];
+    table(byId("s3-mat"), [
+      {label:"Material", render:r=>escHtml(r.key)},
+      {label:"Spend", num:true, render:r=>fmtCurrency(r.value)},
+    ], mats, {empty:"Kurztext zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"group360", title:"Warengruppe 360°", group:"Drilldown",
+  subtitle:"Tiefenanalyse einer einzelnen Warengruppe.", needs:["amount","category"],
+  render(root){
+    const all=dimStats(State.rows,"category").items.filter(d=>d.key!=="(leer)"&&!d.isOther);
+    if(!all.length){ root.innerHTML='<div class="placeholder-dash"><h3>Keine Warengruppendaten</h3></div>'; return; }
+    let sel=State.sel360g; if(!all.some(d=>d.key===sel)) sel=null;
+    if(!sel&&State.filters.category&&all.some(d=>d.key===State.filters.category)) sel=State.filters.category;
+    if(!sel) sel=all[0].key; State.sel360g=sel;
+    const meta=all.find(d=>d.key===sel); const rows=State.rows.filter(r=>String(val(r,"category"))===String(sel));
+    const supSeries=dimSeries(rows,"supplier",12); const topSup=supSeries[0];
+    root.innerHTML=entityPicker("g360","Warengruppe",all.slice(0,400),sel)+kpiStrip([
+      {label:"Spend", value:fmtCurrency(meta.value), meta:`Rang #${meta.rank} · ${fmtPct(meta.share)} gesamt`},
+      {label:"Lieferanten", value:meta.suppliers!=null?fmtNumber(meta.suppliers):"—", meta:"in dieser WG"},
+      {label:"Materialien", value:meta.materials!=null?fmtNumber(meta.materials):"—", meta:"eindeutig"},
+      {label:"Top-Lieferant", value:topSup?fmtPct(meta.value?topSup.value/meta.value:0):"—", meta:topSup?topSup.key:"Konzentration"},
+      {label:"Ø Bestellwert", value:meta.orders?fmtCurrency(meta.value/meta.orders):"—", meta:"je Beleg"},
+    ])+`<div class="grid grid-2">
+      ${cardHTML("g3-sup",null,"Lieferanten in dieser WG","Spend-Verteilung")}
+      ${cardHTML("g3-time",null,"Verlauf","Monatlicher Spend")}
+    </div>
+    <div class="grid grid-2" style="margin-top:20px">
+      ${cardHTML("g3-org",null,"Einkaufsorganisationen","Spend je EinkOrg")}
+      ${cardHTML("g3-disp",null,"Preisstreuung je Material","(Max−Min)/Mittel — Top 15 Materialien")}
+    </div>`;
+    byId("g360").onchange=e=>{ State.sel360g=e.target.value; renderView(); };
+    barH(byId("g3-sup"), supSeries, {empty:"Lieferant zuordnen."});
+    drawTimeArea(byId("g3-time"), rows, {noFilter:true});
+    barH(byId("g3-org"), dimSeries(rows,"purchasing_org",10), {empty:"EinkOrganisation zuordnen."});
+    const disp=priceDispersionMaterials(rows).slice(0,15).map(d=>({key:d.key,value:d.value,
+      tip:`<b>${escHtml(d.key)}</b><br>Streuung ${fmtPct(d.value)}<br>${fmtCurrency(d.min)} – ${fmtCurrency(d.max)} · Ø ${fmtCurrency(d.avg)}<br>${fmtNumber(d.n)} Preise`}));
+    barH(byId("g3-disp"), disp, {fmt:fmtPct, abbr:v=>fmtPct(v), color:cssVar("--kpmg-purple"), empty:"Nettopreis + Kurztext zuordnen."});
+  }
+});
+
+/* ----- I. Synthetic sample data -------------------------------------- */
+/* Synthetic SAP MM (DE) MRO spend — mirrors the real schema so the preset
+   maps it and every dashboard is exercised. */
+function generateSample(){
+  const rand=(a,b)=>a+Math.random()*(b-a);
+  const pick=a=>a[Math.floor(Math.random()*a.length)];
+  const skew=(a,p)=>a[Math.floor(Math.pow(Math.random(),p||1.6)*a.length)];
+  const suppliers=["Müller Industrietechnik GmbH","Schmidt Elektro AG","Weber Maschinenbau KG",
+    "Hofmann Antriebstechnik","Becker Werkzeuge GmbH","Wagner Hydraulik","Fischer Lager & Dichtung",
+    "Koch Automation","Richter Arbeitsschutz","Klein Betriebsstoffe","Wolf Reinigung Service",
+    "Neumann Engineering","Schäfer Bau GmbH","Braun IT-Services","Krüger Verpackung",
+    "Lehmann Labortechnik","Zimmermann Instandhaltung","Hartmann Stahlhandel","König Pneumatik",
+    "Schulz Mess- & Regeltechnik","Maier Förderanlagen","Vogel Klimatechnik","Frank Schweißtechnik",
+    "Peters Kabel & Leitungen","Lang Schmierstoffe","Sommer Gebäudeservice","Busch Krantechnik","Albrecht Chemie"];
+  const manuf=["Siemens","Bosch Rexroth","SKF","Festo","ABB","Schneider Electric","Hilti","Würth",
+    "(kein OEM)","(kein OEM)","(kein OEM)","(kein OEM)"];
+  const groups=[
+    {g:"Elektrik & Automation",cls:"Material",items:["Frequenzumrichter 7,5kW","Sicherung NH00 100A","Schütz 24V DC","Sensor induktiv M12","Kabel NYM-J 3x1,5","SPS-Modul digital"]},
+    {g:"Mechanik & Lager",cls:"Material",items:["Kugellager 6204-2RS","Dichtring 30x42x7","Keilriemen SPA 1250","Zahnrad Modul 2","Hydraulikzylinder 63/40","Linearführung 20mm"]},
+    {g:"Werkzeuge & Zerspanung",cls:"Material",items:["Spiralbohrer HSS 8mm","Schleifscheibe 125mm","Drehmeißel SNMG","Messschieber digital 150mm","Gewindebohrer M8"]},
+    {g:"Arbeitsschutz (PSA)",cls:"Material",items:["Schutzhandschuhe Gr.10","Sicherheitsschuhe S3 42","Schutzbrille klar","Gehörschutz SNR 30","Atemschutzmaske FFP2"]},
+    {g:"Betriebsstoffe",cls:"Material",items:["Hydrauliköl HLP46 20L","Schmierfett EP2 1kg","Industriereiniger 5L","Kühlschmierstoff 20L"]},
+    {g:"Verpackung",cls:"Material",items:["Palette Holz EUR","Stretchfolie 23µm","Faltkarton 600x400","Umreifungsband PP"]},
+    {g:"Laborbedarf",cls:"Material",items:["Pipettenspitzen 1000µl","Reagenz-Set A","Probengefäße 50ml"]},
+    {g:"Instandhaltung Service",cls:"Dienstleistung",items:["Wartung Klimaanlage","Reparatur Förderband","Kalibrierung Messmittel","Inspektion Krananlage","UVV-Prüfung"]},
+    {g:"Engineering Service",cls:"Dienstleistung",items:["CAD-Konstruktion extern","Anlagenprojektierung","Statik-Prüfung"]},
+    {g:"Reinigung & FM",cls:"Dienstleistung",items:["Gebäudereinigung monatl.","Grünpflege Außenanlage","Winterdienst"]},
+    {g:"IT-Dienstleistung",cls:"Dienstleistung",items:["IT-Support extern","Lizenz-Wartung SAP","Netzwerkbetreuung"]},
+    {g:"Bauleistungen",cls:"Dienstleistung",items:["Malerarbeiten Halle","Bodensanierung Epoxid","Elektroinstallation extern"]},
+  ];
+  const orgs=["EKO Nord","EKO Süd","EKO West","EKO Zentral"];
+  const pgroups=["E01 MRO","E02 Technik","E03 Services","E04 C-Teile","E05 Bau","E06 IT"];
+  const materials=[]; let mid=100000;
+  groups.forEach(grp=>grp.items.forEach(txt=>{
+    materials.push({no:"M"+(mid++), text:txt, group:grp.g, cls:grp.cls,
+      base: grp.cls==="Dienstleistung"?rand(400,9000):rand(4,1400),
+      oem: grp.cls==="Material"?pick(manuf):"(kein OEM)"});
+  }));
+  const rows=[]; const start=new Date(2023,0,1).getTime(); const span=820*86400000; let po=4500000;
+  for(let o=0;o<1450;o++){
+    const docNo=String(po++);
+    const docDate=new Date(start+Math.random()*span);
+    const org=skew(orgs,1.2), pg=pick(pgroups), supplier=skew(suppliers,1.8);
+    const lead=3+Math.floor(Math.random()*40);
+    const planDel=new Date(docDate.getTime()+lead*86400000);
+    const varDays=Math.round(Math.random()<0.62?rand(-3,2):rand(-16,22));
+    const actDel=new Date(planDel.getTime()+varDays*86400000);
+    const nLines=1+Math.floor(Math.random()*6);
+    for(let l=0;l<nLines;l++){
+      const m=skew(materials,1.1);
+      const price=Math.round(m.base*rand(0.78,1.27)*100)/100;
+      const qty=m.cls==="Dienstleistung"?(1+Math.floor(Math.random()*5)):(1+Math.floor(Math.pow(Math.random(),1.5)*60));
+      const net=Math.round(price*qty*100)/100;
+      rows.push({
+        "Einkaufsbeleg":docNo,"Belegdatum":docDate,"Lieferdatum":actDel,"Stat.Lieferdatum":planDel,
+        "Name des Lieferanten":supplier,"Hersteller":m.oem,"Warengruppenbez.":m.group,
+        "Material":m.no,"Kurztext":m.text,"Nettopreis":price,"Bestellmenge":qty,
+        "Bestellnettowert":net,"erf. RechnBetrag HW":Math.round(net*rand(0.97,1.03)*100)/100,
+        "EinkOrganisation":org,"Einkäufergruppe":pg,"Kategorisierung":m.cls,"Währung":"EUR",
+        "__source":"beispiel-spend.xlsx"
+      });
+    }
+  }
+  return rows;
+}
+function loadSample(){
+  State.rows=generateSample();
+  State.sources=["beispiel-spend.xlsx"];
+  State.isSample=true;State.errors=[];
+  detectColumns();autoMap();saveMapping(State.mapping);
+  refreshShell();
+  navigate("overview");
+}
+
+/* ----- J. Router / shell rendering ----------------------------------- */
+const nav=document.getElementById("nav");
+const content=document.getElementById("content");
+const topActions=document.getElementById("topActions");
+
+function refreshShell(){
+  // nav
+  const groups={};
+  dashboards.forEach(d=>{ (groups[d.group||"General"]=groups[d.group||"General"]||[]).push(d); });
+  nav.innerHTML=Object.entries(groups).map(([grp,items])=>`
+    <div class="nav-group-label">${escHtml(grp)}</div>
+    ${items.map(d=>{ const ok=dashboardReady(d);
+      return `<a class="nav-item ${ok?"":"disabled"} ${State.activeView===d.id?"active":""}"
+        data-view="${d.id}" title="${ok?"":"Needs: "+(d.needs||[]).join(", ")}">
+        <span class="nav-dot"></span>${escHtml(d.title)}</a>`;}).join("")}
+  `).join("");
+  nav.querySelectorAll(".nav-item[data-view]").forEach(el=>{
+    if(!el.classList.contains("disabled")) el.onclick=()=>navigate(el.dataset.view);
+  });
+  // data status
+  const ds=document.getElementById("dataStatus");
+  if(State.rows.length){
+    ds.innerHTML=`<b>${fmtNumber(State.rows.length)}</b> rows · <b>${State.sources.length}</b> file(s)
+      ${State.isSample?'<br><span style="color:var(--kpmg-light-blue)">sample data</span>':""}`;
+  }else ds.textContent="No data loaded.";
+  // top actions
+  if(State.rows.length){
+    topActions.innerHTML=`
+      <button class="btn btn-ghost" id="actRemap">Edit mapping</button>
+      <button class="btn" id="actAdd">Add files</button>`;
+    topActions.querySelector("#actRemap").onclick=()=>openMappingModal(false);
+    topActions.querySelector("#actAdd").onclick=()=>document.getElementById("fileInput").click();
+  }else topActions.innerHTML="";
+}
+
+function navigate(viewId){
+  const d=dashboards.find(x=>x.id===viewId);
+  if(!d){ renderEmpty(); return; }
+  if(!dashboardReady(d)){ const f=dashboards.find(dashboardReady); if(f) navigate(f.id); else renderEmpty(); return; }
+  State.activeView=viewId;
+  location.hash="#/"+viewId;
+  refreshShell();
+  renderView();
+}
+function renderView(){
+  if(!State.rows.length||!State.activeView){ renderEmpty(); return; }
+  const d=dashboards.find(x=>x.id===State.activeView);
+  if(!d||!dashboardReady(d)){ renderEmpty(); return; }
+  document.getElementById("viewTitle").textContent=d.title;
+  document.getElementById("viewSubtitle").textContent=d.subtitle||"";
+  content.innerHTML=`<div id="filterBar" class="filter-bar"></div><div id="dashRoot"></div>`;
+  renderFilterBar();
+  d.render(document.getElementById("dashRoot"),{});
+}
+function renderActiveDashboard(){ renderView(); }
+function renderFilterBar(){
+  const bar=document.getElementById("filterBar"); if(!bar) return;
+  const keys=Object.keys(State.filters);
+  if(!keys.length){ bar.innerHTML=`<span class="filter-hint">Tipp: Balken, Segmente oder Matrixzellen anklicken, um den gesamten Cube zu filtern.</span>`; return; }
+  const chips=keys.map(role=>`<span class="chip" data-role="${escAttr(role)}">${escHtml(filterLabel(role,State.filters[role]))}<span class="chip-x">×</span></span>`).join("");
+  let links="";
+  if(State.filters.supplier!=null) links+=`<button class="btn btn-ghost btn-sm" data-go="supplier360">→ Lieferant 360°</button>`;
+  if(State.filters.category!=null) links+=`<button class="btn btn-ghost btn-sm" data-go="group360">→ Warengruppe 360°</button>`;
+  bar.innerHTML=`<span class="filter-label">Aktive Filter:</span>${chips}<button class="btn btn-ghost btn-sm" id="clearF">Alle zurücksetzen</button>${links}`;
+  bar.querySelectorAll(".chip").forEach(c=>c.onclick=()=>applyFilter(c.dataset.role, State.filters[c.dataset.role]));
+  document.getElementById("clearF").onclick=clearFilters;
+  bar.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>navigate(b.dataset.go));
+}
+
+function renderEmpty(){
+  State.activeView=null;
+  document.getElementById("viewTitle").textContent="Overview";
+  document.getElementById("viewSubtitle").textContent="Load spend data to begin.";
+  const errs=State.errors.length?`<div class="errors">${State.errors.map(e=>`<div class="error-row">${escHtml(e)}</div>`).join("")}</div>`:"";
+  content.innerHTML=`
+    <div class="empty-wrap">
+      <h2>Load your spend data</h2>
+      <p>Drop one or more <b>.xlsx</b> files to build your dashboards. Everything runs locally in
+         your browser — no data is uploaded anywhere.</p>
+      <div class="dropzone" id="dropzone">
+        <div class="dz-icon">⬆</div>
+        <div class="dz-main">Drag &amp; drop spend files here</div>
+        <div class="dz-sub">or click to browse · multiple files are combined</div>
+      </div>
+      <div class="empty-actions">
+        <button class="btn btn-primary" id="emBrowse">Choose files</button>
+        <button class="btn" id="emSample">Load sample data</button>
+      </div>
+      <div class="note">Supported: Excel workbooks (first sheet read). After loading you'll map your
+        columns to spend roles. The dashboard set is modular — additional analyses plug in as they're defined.</div>
+      ${errs}
+    </div>`;
+  const dz=document.getElementById("dropzone");
+  dz.onclick=()=>document.getElementById("fileInput").click();
+  document.getElementById("emBrowse").onclick=()=>document.getElementById("fileInput").click();
+  document.getElementById("emSample").onclick=loadSample;
+}
+
+/* ----- K. Init ------------------------------------------------------- */
+function init(){
+  // theme
+  const t=loadTheme()|| (window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  setTheme(t);
+  document.querySelectorAll("#themeToggle button").forEach(b=>{
+    b.onclick=()=>setTheme(b.dataset.themeSet);
+  });
+  // mapping from storage (applied after columns detected on load)
+  State.mapping=loadMapping();
+  // file input
+  document.getElementById("fileInput").addEventListener("change",e=>{
+    ingestFiles(e.target.files); e.target.value="";
+  });
+  // global drag & drop
+  ["dragenter","dragover"].forEach(ev=>document.addEventListener(ev,e=>{
+    e.preventDefault(); const dz=document.getElementById("dropzone"); if(dz) dz.classList.add("drag");
+  }));
+  ["dragleave","drop"].forEach(ev=>document.addEventListener(ev,e=>{
+    e.preventDefault(); const dz=document.getElementById("dropzone"); if(dz&&ev!=="drop") dz.classList.remove("drag");
+  }));
+  document.addEventListener("drop",e=>{
+    if(e.dataTransfer&&e.dataTransfer.files.length) ingestFiles(e.dataTransfer.files);
+  });
+  // responsive: re-render active dashboard on resize (debounced)
+  let rt;window.addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(renderActiveDashboard,180); });
+
+  refreshShell();
+  renderEmpty();
+}
+init();
+</script>
+</body>
+</html>
