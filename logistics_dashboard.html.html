@@ -1,0 +1,2617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>KPMG · Logistics Analytics</title>
+<!--
+  Self-contained logistics-efficiency dashboard.
+  External code (loaded from public CDNs, all under permissive open-source licences):
+    D3 v7                            ISC               https://github.com/d3/d3/blob/main/LICENSE
+    SheetJS xlsx Community 0.18.5    Apache-2.0        https://github.com/SheetJS/sheetjs/blob/master/LICENSE
+    MapLibre GL JS 4.7.1             BSD-3-Clause      https://github.com/maplibre/maplibre-gl-js/blob/main/LICENSE.txt
+    CARTO basemap tiles              Free, attribution https://carto.com/attribution/
+    OpenStreetMap tile data          ODbL 1.0          https://www.openstreetmap.org/copyright
+  No copy-left licences (GPL / AGPL / SSPL / BSL) are used.
+-->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js"></script>
+<style>
+/* =========================================================================
+   KPMG theme — variables, base styles, app shell. Mirrors the
+   visual language of the spend-analytics reference template.
+   ========================================================================= */
+:root{
+  /* KPMG palette (Pantone-derived) */
+  --kpmg-blue:#00338D;          --kpmg-medium-blue:#005EB8;
+  --kpmg-light-blue:#0091DA;    --kpmg-purple:#483698;
+  --kpmg-violet:#470A68;        --kpmg-teal:#00A3A1;
+  --kpmg-green:#43B02A;         --kpmg-pink:#C6007E;
+  --kpmg-orange:#FF8200;        --kpmg-yellow:#FFD500;
+  --kpmg-dark-blue:#0A1F44;
+
+  /* Surface system (light) */
+  --bg:#F4F6FA;            --surface:#FFFFFF;       --surface-2:#F8FAFD;
+  --surface-3:#EFF3F9;     --border:#E1E7F0;        --border-soft:#EAEFF6;
+  --text:#0A1F44;          --text-muted:#506180;    --text-faint:#8DA0BC;
+  --shadow-sm:0 1px 2px rgba(10,31,68,.06);
+  --shadow-md:0 4px 14px rgba(10,31,68,.08);
+  --shadow-lg:0 10px 32px rgba(10,31,68,.12);
+  --radius:14px;           --radius-sm:10px;        --radius-pill:999px;
+}
+[data-theme="dark"]{
+  --bg:#0B1426; --surface:#11203B; --surface-2:#16294A; --surface-3:#1B335A;
+  --border:#22406F; --border-soft:#1A2F54;
+  --text:#EAF2FF; --text-muted:#9FB4D6; --text-faint:#6E83A8;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 6px 18px rgba(0,0,0,.45);
+  --shadow-lg:0 14px 36px rgba(0,0,0,.55);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-size:14px; line-height:1.45;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+a{color:inherit; text-decoration:none}
+button{font:inherit; color:inherit}
+
+/* ---- App shell ---- */
+.app{display:grid; grid-template-columns:264px 1fr; min-height:100vh}
+
+.sidebar{
+  background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; min-width:0; position:sticky; top:0; height:100vh;
+}
+.brand{padding:18px 18px 14px; border-bottom:1px solid var(--border-soft); display:flex; align-items:center; gap:10px}
+.brand-logo{width:50px; height:auto; flex:0 0 50px}
+[data-theme="dark"] .brand-logo path{fill:var(--text)}
+.brand-title{font-weight:700; font-size:14px; color:var(--text); letter-spacing:.04em}
+.brand-sub{font-size:11px; color:var(--text-muted); letter-spacing:.06em; text-transform:uppercase}
+.nav{flex:1 1 auto; overflow-y:auto; padding:10px 8px 16px}
+.nav-group-label{
+  font-size:10.5px; text-transform:uppercase; letter-spacing:.12em;
+  color:var(--text-faint); padding:14px 10px 6px; font-weight:700;
+}
+.nav-item{
+  display:flex; align-items:center; gap:10px; padding:8px 10px; margin:1px 0;
+  border-radius:8px; cursor:pointer; color:var(--text); font-size:13px;
+  border:1px solid transparent;
+}
+.nav-item:hover{background:var(--surface-2)}
+.nav-item.active{background:var(--surface-3); border-color:var(--border); color:var(--kpmg-blue); font-weight:600}
+.nav-item.disabled{color:var(--text-faint); cursor:not-allowed}
+.nav-item.disabled:hover{background:transparent}
+.nav-dot{width:6px; height:6px; border-radius:50%; background:var(--kpmg-light-blue); flex:0 0 6px}
+.nav-item.disabled .nav-dot{background:var(--text-faint)}
+.nav-item.active .nav-dot{background:var(--kpmg-blue)}
+
+.theme-toggle{display:flex; gap:4px; padding:10px 12px; border-top:1px solid var(--border-soft)}
+.theme-toggle button{
+  flex:1; padding:6px 8px; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:8px; font-size:12px; cursor:pointer; color:var(--text-muted);
+}
+.theme-toggle button.active{background:var(--surface-3); color:var(--kpmg-blue); border-color:var(--kpmg-light-blue)}
+.data-status{padding:10px 14px 16px; font-size:11px; color:var(--text-muted); line-height:1.5; border-top:1px solid var(--border-soft)}
+.data-status b{color:var(--text)}
+
+/* ---- Main area ---- */
+.main{display:flex; flex-direction:column; min-width:0; min-height:100vh}
+.topbar{
+  display:flex; justify-content:space-between; align-items:center; gap:18px;
+  padding:14px 28px; background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:5;
+}
+.view-title{font-size:20px; font-weight:700; line-height:1.2; color:var(--text)}
+.view-subtitle{font-size:12.5px; color:var(--text-muted); margin-top:2px}
+.top-actions{display:flex; gap:8px; flex-wrap:wrap}
+
+.btn{
+  display:inline-flex; align-items:center; gap:6px; padding:8px 14px;
+  background:var(--surface-2); color:var(--text); border:1px solid var(--border);
+  border-radius:8px; cursor:pointer; font-size:13px; font-weight:500;
+  transition:background .15s, border-color .15s;
+}
+.btn:hover{background:var(--surface-3); border-color:var(--kpmg-light-blue)}
+.btn-primary{background:var(--kpmg-blue); color:#fff; border-color:var(--kpmg-blue)}
+.btn-primary:hover{background:var(--kpmg-medium-blue); border-color:var(--kpmg-medium-blue)}
+.btn-ghost{background:transparent}
+.btn-sm{padding:5px 10px; font-size:12px}
+
+.content{padding:24px 28px 36px; flex:1 1 auto; min-width:0; overflow-x:hidden}
+
+/* ---- KPI strip ---- */
+.kpi-strip{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:20px}
+.kpi{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:14px 16px; box-shadow:var(--shadow-sm); min-width:0;
+}
+.kpi-label{font-size:11.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); font-weight:600}
+.kpi-value{font-size:22px; font-weight:800; color:var(--text); margin:3px 0 1px; line-height:1.15}
+.kpi-meta{font-size:11.5px; color:var(--text-faint)}
+
+/* ---- Cards & grid ---- */
+.grid{display:grid; gap:18px}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(420px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px 14px; box-shadow:var(--shadow-sm); min-width:0;
+}
+.card-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:8px}
+.card-title{margin:0; font-size:15px; font-weight:700; color:var(--text)}
+.card-title .anum{
+  display:inline-block; background:var(--kpmg-blue); color:#fff;
+  border-radius:6px; font-size:10.5px; font-weight:700; padding:2px 6px; margin-right:8px;
+  vertical-align:1.5px;
+}
+.heur{
+  display:inline-block; margin-left:8px; font-size:10.5px; padding:2px 6px;
+  border-radius:6px; background:var(--surface-3); color:var(--text-muted);
+  border:1px dashed var(--border); cursor:help; vertical-align:1.5px;
+}
+.card-sub{font-size:12px; color:var(--text-muted); margin-top:2px}
+.chart-host{margin-top:10px; min-height:80px}
+.no-data{color:var(--text-faint); text-align:center; padding:36px 12px; font-size:12.5px}
+
+/* ---- Filter chips ---- */
+.filter-bar{
+  display:flex; align-items:center; flex-wrap:wrap; gap:6px;
+  margin-bottom:14px; min-height:30px;
+}
+.filter-label{font-size:11.5px; color:var(--text-muted); font-weight:600; margin-right:4px}
+.filter-hint{font-size:12px; color:var(--text-faint); font-style:italic}
+.chip{
+  display:inline-flex; align-items:center; gap:6px; padding:4px 8px 4px 10px;
+  background:var(--surface-3); border:1px solid var(--border); border-radius:var(--radius-pill);
+  font-size:12px; cursor:pointer; color:var(--text);
+}
+.chip:hover{border-color:var(--kpmg-pink); color:var(--kpmg-pink)}
+.chip-x{font-weight:700; color:var(--text-muted)}
+.aufart-chip .dot{width:7px; height:7px; border-radius:50%; background:var(--kpmg-green); flex:0 0 7px}
+.aufart-chip small{color:var(--text-muted); font-weight:400}
+.aufart-chip.off{opacity:.55; text-decoration:line-through; background:transparent}
+.aufart-chip.off .dot{background:var(--text-faint)}
+.aufart-chip:hover{border-color:var(--kpmg-light-blue); color:var(--text)}
+
+/* ---- Empty / dropzone ---- */
+.empty-wrap{max-width:680px; margin:30px auto 0; text-align:center}
+.empty-wrap h2{margin:0 0 6px; color:var(--text)}
+.empty-wrap p{color:var(--text-muted); margin:0 0 22px; font-size:13.5px}
+.dropzone{
+  border:2px dashed var(--border); border-radius:16px; padding:42px 24px;
+  background:var(--surface); cursor:pointer; transition:all .15s ease-in-out;
+}
+.dropzone.drag{border-color:var(--kpmg-light-blue); background:var(--surface-2)}
+.dz-icon{font-size:32px; color:var(--kpmg-light-blue); margin-bottom:6px}
+.dz-main{font-weight:600; color:var(--text)}
+.dz-sub{color:var(--text-muted); font-size:12.5px; margin-top:4px}
+.empty-actions{display:flex; justify-content:center; gap:10px; margin:18px 0 8px}
+.note{font-size:11.5px; color:var(--text-faint); margin-top:14px}
+.errors{margin-top:22px; text-align:left}
+.error-row{
+  font-size:12px; color:#9A3A3A; background:#FFE3E1; border:1px solid #F3BFBE;
+  padding:6px 10px; border-radius:8px; margin:4px 0;
+}
+[data-theme="dark"] .error-row{background:#3B1C1C; color:#FFC2C0; border-color:#5E2D2D}
+
+/* ---- Modal ---- */
+.overlay{
+  position:fixed; inset:0; background:rgba(10,31,68,.55); z-index:40;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+[data-theme="dark"] .overlay{background:rgba(0,0,0,.65)}
+.modal{
+  background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-lg);
+  max-width:760px; width:100%; max-height:88vh; overflow:auto;
+  display:flex; flex-direction:column;
+}
+.modal-head{padding:18px 22px 8px; border-bottom:1px solid var(--border-soft)}
+.modal-head h2{margin:0 0 4px; color:var(--text); font-size:18px}
+.modal-head p{color:var(--text-muted); margin:0; font-size:12.5px}
+.modal-body{padding:14px 22px; flex:1 1 auto; overflow-y:auto}
+.modal-foot{padding:12px 22px 18px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid var(--border-soft)}
+.map-row{display:grid; grid-template-columns:200px 1fr; gap:14px; padding:6px 0; align-items:center}
+.map-role{font-size:13px; font-weight:600; color:var(--text)}
+.map-role small{display:block; color:var(--text-muted); font-weight:400; font-size:11.5px; margin-top:1px}
+.map-row select{
+  width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:8px;
+  background:var(--surface-2); color:var(--text); font-size:13px;
+}
+
+/* ---- Tooltip ---- */
+.tooltip{
+  position:fixed; pointer-events:none; opacity:0; transition:opacity .12s;
+  background:var(--surface); color:var(--text); border:1px solid var(--border);
+  padding:8px 10px; border-radius:8px; box-shadow:var(--shadow-md);
+  font-size:12px; max-width:280px; z-index:90; line-height:1.4;
+}
+.tip-hint{display:block; margin-top:3px; font-size:11px; color:var(--text-muted); font-style:italic}
+
+/* ---- Axes / chart bits ---- */
+.gridline path{stroke:transparent} .gridline line{stroke:var(--border); stroke-dasharray:2 3; opacity:.7}
+.axis path,.axis line{stroke:var(--border)} .axis text{fill:var(--text-muted); font-size:11px}
+.bar{cursor:default}
+.legend{display:flex; flex-wrap:wrap; gap:6px 14px; padding-top:10px; font-size:11.5px; color:var(--text-muted)}
+.legend .lg{display:inline-flex; align-items:center; gap:5px}
+.legend .sw{display:inline-block; width:10px; height:10px; border-radius:2px}
+
+/* ---- Tables ---- */
+.tbl-wrap{overflow-x:auto; margin-top:8px}
+.data-table{width:100%; border-collapse:collapse; font-size:12.5px}
+.data-table th, .data-table td{
+  padding:6px 10px; border-bottom:1px solid var(--border-soft);
+  text-align:left; vertical-align:top; color:var(--text);
+}
+.data-table th{background:var(--surface-2); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:700}
+.data-table tr:hover td{background:var(--surface-2)}
+.data-table tbody tr.sel td{background:var(--surface-3)}
+.data-table tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--kpmg-pink)}
+
+/* ---- Map ---- */
+.map-host{position:relative; height:620px; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--border)}
+.maplibregl-popup-content{
+  background:var(--surface)!important; color:var(--text)!important;
+  border:1px solid var(--border); border-radius:8px; padding:8px 10px!important;
+  font-size:12px; box-shadow:var(--shadow-md);
+}
+.maplibregl-popup-close-button{color:var(--text-muted)!important}
+.maplibregl-ctrl-attrib{font-size:10.5px!important}
+.map-controls{
+  display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  margin-bottom:12px;
+}
+.map-controls .ctl{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
+  padding:8px 10px;
+}
+.map-controls label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--text-muted); font-weight:700; margin-bottom:4px}
+.map-controls select, .map-controls input[type="number"]{
+  width:100%; padding:5px 8px; background:var(--surface); color:var(--text);
+  border:1px solid var(--border); border-radius:7px; font-size:13px;
+}
+.map-legend{
+  display:flex; flex-wrap:wrap; gap:6px 14px;
+  padding:8px 10px; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:8px; margin-top:8px; font-size:12px;
+}
+.map-legend .lg{display:inline-flex; align-items:center; gap:5px; color:var(--text)}
+.map-legend .sw{display:inline-block; width:14px; height:4px; border-radius:2px}
+.map-stats{
+  display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--text-muted);
+  margin-top:8px; padding-left:2px;
+}
+.map-stats b{color:var(--text)}
+
+/* ---- Misc ---- */
+.placeholder-dash{padding:60px 24px; text-align:center}
+.placeholder-dash h3{margin:0 0 6px; color:var(--text)}
+.placeholder-dash p{color:var(--text-muted); font-size:13px; margin:0}
+.sel-360{display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap}
+.sel-360 label{font-size:12px; color:var(--text-muted); font-weight:600}
+.sel-360 select{
+  padding:6px 8px; background:var(--surface); color:var(--text);
+  border:1px solid var(--border); border-radius:8px; font-size:13px; min-width:280px;
+}
+
+@media (max-width:900px){
+  .app{grid-template-columns:1fr}
+  .sidebar{position:relative; height:auto; border-right:none; border-bottom:1px solid var(--border)}
+  .nav{max-height:280px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <!-- Official KPMG wordmark, inlined from KPMG_blue_logo.svg (repository root) to keep this file self-contained. All rights with KPMG. -->
+      <svg class="brand-logo" viewBox="0.05 0.2 80.58 32.08" xmlns="http://www.w3.org/2000/svg" aria-label="KPMG">
+        <path fill="var(--kpmg-blue)" d="m 62.74202,0.20119 0,16.00227 -0.20416,0.16862 -0.20416,0.16862 -0.19566,0.17706 -0.18715,0.17705 -0.17864,0.17705 -0.17864,0.18549 -0.17013,0.18548 -0.17014,0.18549 0,-17.42713 -17.88969,0 0,14.56898 -1.48018,0 0,-14.56898 -17.88969,0 0,14.59427 -1.48018,0 0,-14.59427 -17.88969,0 0,16.6346 -4.56813,15.08327 4.01519,0 2.0161,-6.67744 0.57846,0 3.33464,6.67744 4.84885,0 -3.23257,-6.67744 7.33282,0 -2.03311,6.67744 4.38098,0 2.00759,-6.66058 0.96977,0 0,-0.0169 1.37809,0 0.11059,0 8.27707,0 -1.93954,6.66059 4.42351,0 1.87999,-6.66059 1.99058,0 0.051,6.66059 3.70894,0 4.26189,-6.66059 2.79021,0 -1.44615,6.66059 4.35546,0 1.42063,-6.66059 2.51799,0 -0.017,0.3794 0.009,0.38783 0.017,0.37097 0.034,0.37097 0.0255,0.17705 0.0255,0.17706 0.034,0.17705 0.034,0.17706 0.0425,0.17705 0.0425,0.16862 0.051,0.16862 0.051,0.16863 0.0596,0.16862 0.0596,0.16019 0.068,0.16019 0.0681,0.15176 0.0766,0.16019 0.0766,0.15176 0.0851,0.14333 0.0851,0.15176 0.0936,0.14333 0.10208,0.1349 0.10209,0.14333 0.11058,0.12646 0.11059,0.1349 0.11059,0.12647 0.1276,0.12647 0.1276,0.11803 0.16163,0.1349 0.16163,0.1349 0.17013,0.12646 0.17864,0.11804 0.17865,0.11804 0.17864,0.1096 0.18715,0.0927 0.19565,0.10117 0.18715,0.0843 0.19566,0.0843 0.19565,0.0759 0.20416,0.0759 0.20416,0.0675 0.20417,0.059 0.20416,0.059 0.20416,0.0506 0.40832,0.0927 0.41684,0.0675 0.40832,0.059 0.40832,0.0506 0.39982,0.0337 0.39131,0.0169 0.3828,0.0169 0.36579,0 0.4934,-0.008 0.49339,-0.008 0.5019,-0.0253 0.50189,-0.0253 0.5019,-0.0422 0.5019,-0.0422 0.5019,-0.0506 0.5019,-0.059 0.5104,-0.0675 0.51041,-0.0759 0.5104,-0.0843 0.51041,-0.0843 0.5104,-0.0927 0.51041,-0.10117 0.5104,-0.10117 0.51891,-0.11804 1.51421,-6.04511 4.96794,0 0,-25.04043 -17.8897,0 z m -56.4593,24.41653 0.0255,-0.0927 0.0596,0.0927 -0.0851,0 z m 15.58437,-8.97072 -0.2552,0.85155 -2.38189,7.84094 -0.0936,0.27823 -7.82621,0 -0.60398,-1.28154 8.43019,-8.54072 -5.4188,0 -6.59273,7.03999 2.13519,-7.03999 -3.99817,0 0,-13.96193 16.60517,0 0,14.81347 z m 4.61916,6.62686 0,0 -0.1276,0.008 -0.11909,0.008 -0.1276,0.008 -0.13611,0 -0.17864,0 -0.15312,0 -0.14462,0.008 -0.13611,0 -1.06334,-0.008 0.49339,-1.80426 0.22968,-0.8937 0.56145,-2.09934 0.17864,0 0.18715,0 0.17864,-0.008 0.17014,0 0.82515,0 0.5019,0.008 0.45936,0.0169 0.20416,0.008 0.19566,0.0169 0.18715,0.0253 0.17013,0.0253 0.15312,0.0253 0.14462,0.0422 0.13611,0.0422 0.11909,0.0506 0.10208,0.0506 0.0936,0.0675 0.0851,0.0675 0.068,0.0843 0.0425,0.0675 0.034,0.0675 0.034,0.0759 0.0255,0.0843 0.017,0.0927 0.009,0.0927 0,0.10117 0,0.1096 -0.009,0.11804 -0.008,0.11803 -0.0255,0.1349 -0.0255,0.1349 -0.0766,0.28666 -0.0936,0.32038 -0.0936,0.2698 -0.10208,0.26136 -0.11058,0.2445 -0.1191,0.22764 -0.0596,0.10118 -0.0596,0.10117 -0.0681,0.10117 -0.0766,0.0927 -0.0766,0.0927 -0.0766,0.0843 -0.0851,0.0843 -0.0851,0.0759 -0.0936,0.0675 -0.0936,0.0759 -0.10208,0.059 -0.11059,0.0675 -0.11059,0.059 -0.11909,0.0506 -0.1191,0.0506 -0.1276,0.0422 -0.1361,0.0506 -0.14462,0.0337 -0.15312,0.0337 -0.15312,0.0337 -0.17014,0.0253 -0.17013,0.0253 -0.17864,0.0169 -0.18715,0.0169 z m 12.0966,2.34386 1.74389,-6.15472 0.0681,6.15472 -1.81194,0 z m 2.65411,-9.84755 -4.1513,0 -2.85826,9.84755 -4.4065,0 0.20416,-0.0843 0.20416,-0.0843 0.19566,-0.0843 0.19565,-0.0927 0.18715,-0.0927 0.17864,-0.10961 0.17865,-0.10117 0.17013,-0.10961 0.17014,-0.11803 0.16162,-0.11804 0.15313,-0.11803 0.15312,-0.1349 0.14461,-0.12647 0.13611,-0.14333 0.13611,-0.1349 0.1276,-0.15176 0.1276,-0.14332 0.1191,-0.1602 0.11058,-0.15176 0.11059,-0.16862 0.10208,-0.16862 0.0936,-0.16862 0.0936,-0.17706 0.0851,-0.18548 0.0851,-0.18549 0.0766,-0.18548 0.068,-0.19392 0.0681,-0.20234 0.051,-0.20235 0.0596,-0.20235 0.0425,-0.21921 0.0425,-0.21077 0.0596,-0.33725 0.051,-0.32038 0.034,-0.30352 0.0255,-0.28666 0.009,-0.28666 -0.009,-0.26136 -0.008,-0.26137 -0.034,-0.2445 -0.034,-0.22764 -0.0596,-0.22764 -0.0596,-0.21078 -0.0851,-0.20235 -0.0936,-0.19391 -0.10208,-0.19392 -0.11909,-0.17705 -0.13611,-0.16862 -0.11059,-0.11804 -0.11059,-0.11803 -0.11909,-0.10118 -0.1276,-0.0927 -0.13611,-0.0927 -0.13611,-0.0843 -0.14461,-0.0759 -0.14462,-0.0675 -0.15312,-0.0675 -0.15312,-0.0506 -0.16163,-0.0506 -0.16163,-0.0506 -0.17013,-0.0422 -0.17014,-0.0337 -0.17013,-0.0337 -0.17865,-0.0253 -0.36579,-0.0506 -0.36579,-0.0253 -0.37429,-0.0253 -0.38281,-0.008 -0.7656,0 -0.7571,0 -0.23819,0 -0.42534,0 -0.52742,0 -0.58697,0 -0.56995,0 -0.48488,0 -0.34027,0 -0.1276,0 0,-13.93664 16.60517,0 0,13.93664 z m 10.089,9.84755 -2.49247,0 3.77699,-5.90179 -1.28452,5.90179 z m 9.28087,-9.56933 -0.009,3.41461 -0.21267,0.29509 -0.19566,0.30352 -0.19565,0.30352 -0.17864,0.30352 -0.17014,0.30352 -0.17013,0.31195 -0.14462,0.30352 -0.14461,0.30352 -0.13611,0.29509 -0.11909,0.30352 -0.1191,0.29509 -0.10208,0.28666 -0.0936,0.28665 -0.0851,0.27823 -0.0766,0.2698 -0.0681,0.26979 -0.0425,0.17706 -0.0425,0.18548 -0.0425,0.17706 -0.034,0.18548 -0.034,0.17705 -0.0255,0.17706 -0.0255,0.17705 -0.017,0.18549 -2.44144,0 2.08416,-9.82226 -7.02658,-0.008 -6.28649,9.83069 -0.45936,0 0,-23.78419 16.61368,0 0,14.21486 z m 9.5786,13.59097 -0.34878,0.059 -0.35728,0.0506 -0.35729,0.0506 -0.34877,0.0422 -0.34878,0.0337 -0.34878,0.0253 -0.34027,0.0169 -0.34027,0 -0.22117,0 -0.22118,-0.008 -0.21267,-0.0169 -0.21266,-0.0253 -0.20417,-0.0337 -0.19565,-0.0337 -0.19566,-0.0422 -0.18714,-0.0506 -0.17865,-0.059 -0.17864,-0.059 -0.17013,-0.0759 -0.16163,-0.0759 -0.16163,-0.0927 -0.15312,-0.0927 -0.14462,-0.10117 -0.1361,-0.10118 -0.13611,-0.11803 -0.1191,-0.12647 -0.11909,-0.12647 -0.11059,-0.14333 -0.10208,-0.14332 -0.0936,-0.1602 -0.0851,-0.16019 -0.0851,-0.16862 -0.0681,-0.17705 -0.0596,-0.19392 -0.051,-0.19391 -0.051,-0.20235 -0.034,-0.21078 -0.0255,-0.21921 -0.017,-0.22764 -0.009,-0.23607 7.74114,0 -0.85067,3.39774 z m 9.81679,-4.02164 -4.18532,0 0.68904,-2.74855 -8.38765,0 -0.68905,2.74855 -4.05772,0 0,-0.56489 0.051,-0.23607 0.0425,-0.23607 0.051,-0.25294 0.051,-0.25293 0.0766,-0.27823 0.0766,-0.27822 0.0851,-0.27823 0.0936,-0.2698 0.10208,-0.26979 0.11059,-0.2698 0.11909,-0.26136 0.1191,-0.26137 0.13611,-0.26136 0.1361,-0.2445 0.14462,-0.25294 0.16163,-0.23607 0.16163,-0.23607 0.16162,-0.22764 0.17865,-0.21921 0.18714,-0.21078 0.19566,-0.20235 0.19566,-0.18548 0.21266,-0.18548 0.21267,-0.17706 0.22118,-0.16019 0.23819,-0.15176 0.23819,-0.1349 0.24669,-0.12646 0.2552,-0.11804 0.26371,-0.10117 0.27222,-0.0843 0.28072,-0.0675 0.28923,-0.059 0.29774,-0.0422 0.30624,-0.0253 0.31475,-0.008 0.2467,0.008 0.24669,0.0169 0.2467,0.0337 0.23819,0.0506 0.11909,0.0337 0.11059,0.0337 0.11059,0.0337 0.10208,0.0506 0.10208,0.0422 0.10208,0.059 0.0936,0.059 0.0936,0.059 0.0851,0.0759 0.0851,0.0759 0.0766,0.0759 0.0766,0.0927 0.0681,0.0843 0.0596,0.10117 0.051,0.1096 0.051,0.10961 0.0425,0.11804 0.034,0.12646 0.0255,0.12647 0.0255,0.14333 0.009,0.14333 0,0.15176 0,0.16019 -0.017,0.16862 5.00197,0 0.0766,-0.34568 0.0681,-0.39626 0.034,-0.21078 0.017,-0.22764 0.017,-0.22764 0,-0.23607 -0.008,-0.2445 -0.0255,-0.25293 -0.0255,-0.11804 -0.017,-0.12647 -0.034,-0.12646 -0.034,-0.12647 -0.0425,-0.1349 -0.0425,-0.12646 -0.051,-0.12647 -0.0596,-0.12647 -0.0596,-0.12647 -0.0766,-0.12646 -0.0766,-0.12647 -0.0851,-0.12647 -0.10208,-0.13489 -0.11059,-0.12647 -0.11059,-0.12647 -0.11909,-0.11803 -0.1276,-0.11804 -0.13611,-0.1096 -0.13611,-0.10118 -0.14461,-0.10117 -0.15313,-0.10117 -0.15312,-0.0843 -0.16162,-0.0843 -0.17014,-0.0843 -0.17013,-0.0759 -0.17865,-0.0759 -0.18715,-0.0675 -0.18714,-0.0675 -0.18715,-0.059 -0.20416,-0.0506 -0.19566,-0.0506 -0.21267,-0.0506 -0.21267,-0.0422 -0.21267,-0.0422 -0.22117,-0.0337 -0.22968,-0.0253 -0.46787,-0.0506 -0.47638,-0.0422 -0.5019,-0.0169 -0.51041,-0.008 -0.3828,0.008 -0.39982,0.008 -0.41683,0.0253 -0.43384,0.0337 -0.45086,0.0506 -0.45936,0.059 -0.46787,0.0759 -0.47638,0.10117 -0.23819,0.0506 -0.2467,0.059 -0.23819,0.0675 -0.24669,0.0675 -0.2467,0.0759 -0.24669,0.0843 -0.2467,0.0843 -0.23819,0.0927 -0.24669,0.10117 -0.2467,0.10961 -0.23819,0.1096 -0.2467,0.11804 -0.23818,0.12646 -0.23819,0.1349 -0.23819,0.1349 -0.23819,0.15176 0,-14.92308 16.6307,0 0,23.78419 z"/>
+      </svg>
+      <div>
+        <div class="brand-title">KPMG</div>
+        <div class="brand-sub">Logistics Analytics</div>
+      </div>
+    </div>
+    <nav id="nav" class="nav"></nav>
+    <div class="theme-toggle" id="themeToggle">
+      <button data-theme-set="light">Light</button>
+      <button data-theme-set="dark">Dark</button>
+    </div>
+    <div class="data-status" id="dataStatus">No data loaded.</div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <div class="view-title" id="viewTitle">Overview</div>
+        <div class="view-subtitle" id="viewSubtitle">Load shipment data to begin.</div>
+      </div>
+      <div class="top-actions" id="topActions"></div>
+    </header>
+    <section class="content" id="content"></section>
+  </main>
+</div>
+<input type="file" id="fileInput" multiple accept=".xlsx,.xls,.geojson,.json" style="display:none" />
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   A. State, ROLES, formatters
+   ========================================================================= */
+const State = {
+  rows: [],            // shipment rows (one per Tour)
+  sources: [],         // ingested file names
+  errors: [],          // ingestion errors
+  columns: [],         // detected columns
+  mapping: {},         // role -> column
+  isSample: false,
+  detectedPreset: null,
+  activeView: null,
+  filters: {},         // role -> selected value
+  aufartOff: new Set(),// "AufArt" values hidden globally (all tabs, incl. 360°)
+  geojson: null,       // FeatureCollection of route lines
+  geojsonSource: null, // file name
+  sel360c: null,       // selected carrier for 360
+  sel360l: null,       // selected lane for 360
+  selLane: null,       // highlighted lane on the lanes dashboard (linked visuals)
+  mapView: { color:"carrier", size:"weight", top:8, basemap:"auto" },
+};
+
+/* Roles describe the canonical fields the dashboard reasons about. */
+const ROLES = [
+  {key:"shipment_id", label:"Tour-Nr.",            hint:"Eindeutige Tour / Sendung",          type:"string", required:true},
+  {key:"tour_date",   label:"Datum",               hint:"Tour- oder Versanddatum",            type:"date"},
+  {key:"carrier",     label:"Frachtführer",        hint:"Frachtführername",                   type:"string"},
+  {key:"ownership",   label:"Logistik-Modus",      hint:"Eigen- vs. Fremdlogistik",           type:"string"},
+  {key:"temp_range",  label:"Temperaturbereich",   hint:"Frisch / Gefroren / Trocken",        type:"string"},
+  {key:"area",        label:"Hauptbereich",        hint:"Geschäftsbereich",                   type:"string"},
+  {key:"area_name",   label:"Bereichsname",        hint:"Beschreibender Bereichsname",        type:"string"},
+  {key:"traffic_type",label:"Verkehrsart",         hint:"Transportart (z.B. Nahverkehr)",     type:"string"},
+  {key:"shipment_kind",label:"Stückgut / Container", hint:"Sendungsart",                      type:"string"},
+  {key:"auf_art",     label:"Auftragsart (AufArt)", hint:"Auftrags-/Fahrtart — global ein-/ausblendbar", type:"string"},
+  {key:"weight",      label:"Tats. Gewicht (kg)",  hint:"Transportiertes Gewicht je Tour",    type:"number"},
+  {key:"price",       label:"Preis (€)",           hint:"Transportkosten je Tour",            type:"number", required:true},
+  {key:"tour_km",     label:"Tour-KM",             hint:"Tour-Distanz in Kilometern",         type:"number"},
+  {key:"pallets",     label:"#Stellplätze",        hint:"Anzahl Stellplätze je Tour",         type:"number"},
+  {key:"origin_city", label:"Absender-Ort",        hint:"Quell-Stadt",                        type:"string"},
+  {key:"origin_pc",   label:"Absender-PLZ",        hint:"Quell-Postleitzahl",                 type:"string"},
+  {key:"origin_country",label:"Absender-Land",     hint:"Quell-Länderkürzel",                 type:"string"},
+  {key:"dest_city",   label:"Empfänger-Ort",       hint:"Ziel-Stadt",                         type:"string"},
+  {key:"dest_pc",     label:"Empfänger-PLZ",       hint:"Ziel-Postleitzahl",                  type:"string"},
+  {key:"dest_country",label:"Empfänger-Land",      hint:"Ziel-Länderkürzel",                  type:"string"},
+];
+
+const ROLE_LABEL = Object.fromEntries(ROLES.map(r=>[r.key, r.label]));
+
+/* Formatters (German locale by default — matches the example template). */
+const _nfNum  = new Intl.NumberFormat("de-DE", {maximumFractionDigits:0});
+const _nfNum1 = new Intl.NumberFormat("de-DE", {maximumFractionDigits:1, minimumFractionDigits:1});
+const _nfNum2 = new Intl.NumberFormat("de-DE", {maximumFractionDigits:2, minimumFractionDigits:2});
+const _nfCur  = new Intl.NumberFormat("de-DE", {style:"currency", currency:"EUR", maximumFractionDigits:0});
+const _nfCur2 = new Intl.NumberFormat("de-DE", {style:"currency", currency:"EUR", maximumFractionDigits:2});
+const _nfPct  = new Intl.NumberFormat("de-DE", {style:"percent", maximumFractionDigits:1});
+
+function fmtNumber(v){ if(v==null||isNaN(v)) return "—"; return _nfNum.format(v); }
+function fmtNumber1(v){ if(v==null||isNaN(v)) return "—"; return _nfNum1.format(v); }
+function fmtNumber2(v){ if(v==null||isNaN(v)) return "—"; return _nfNum2.format(v); }
+function fmtCurrency(v){ if(v==null||isNaN(v)) return "—"; return _nfCur.format(v); }
+function fmtCurrency2(v){ if(v==null||isNaN(v)) return "—"; return _nfCur2.format(v); }
+function fmtPct(v){ if(v==null||isNaN(v)) return "—"; return _nfPct.format(v); }
+function fmtWeight(kg){ if(kg==null||isNaN(kg)) return "—";
+  if(Math.abs(kg)>=1000) return fmtNumber(kg/1000)+" t";
+  return fmtNumber(kg)+" kg";
+}
+function fmtKm(v){ if(v==null||isNaN(v)) return "—"; return fmtNumber(v)+" km"; }
+function fmtAbbrev(v){ if(v==null||isNaN(v)) return "—";
+  const a=Math.abs(v);
+  if(a>=1e9) return (v/1e9).toFixed(1).replace(".",",")+" Mrd";
+  if(a>=1e6) return (v/1e6).toFixed(1).replace(".",",")+" Mio";
+  if(a>=1e3) return (v/1e3).toFixed(0)+"k";
+  return _nfNum.format(v);
+}
+
+function coerceNumber(v){
+  if(v==null||v==="") return null;
+  if(typeof v==="number") return isFinite(v)?v:null;
+  let s = String(v).trim();
+  if(!s) return null;
+  // Handle European "1.234,56" or US "1,234.56"
+  const hasComma=s.includes(","), hasDot=s.includes(".");
+  if(hasComma && hasDot){
+    if(s.lastIndexOf(",")>s.lastIndexOf(".")) s=s.replace(/\./g,"").replace(",", ".");
+    else s=s.replace(/,/g,"");
+  } else if(hasComma){
+    s=s.replace(/\./g,"").replace(",", ".");
+  } else {
+    // strip thousand separators (groups of 3 digits)
+    if(/^-?\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
+  }
+  const n=parseFloat(s);
+  return isFinite(n)?n:null;
+}
+function coerceDate(v){
+  if(v==null||v==="") return null;
+  if(v instanceof Date) return isNaN(v)?null:v;
+  if(typeof v==="number"){
+    // Excel serial date
+    const d=new Date(Math.round((v-25569)*86400*1000)); return isNaN(d)?null:d;
+  }
+  const d=new Date(v); return isNaN(d)?null:d;
+}
+
+/* =========================================================================
+   B. Theme + storage helpers
+   ========================================================================= */
+const LS_THEME   = "kpmg_logistics_theme";
+const LS_MAPPING = "kpmg_logistics_mapping";
+const LS_MAPVIEW = "kpmg_logistics_mapview";
+
+function loadTheme(){ try{ return localStorage.getItem(LS_THEME); }catch(e){ return null; } }
+function saveTheme(t){ try{ localStorage.setItem(LS_THEME, t); }catch(e){} }
+function setTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  saveTheme(t);
+  document.querySelectorAll("#themeToggle button").forEach(b=>{
+    b.classList.toggle("active", b.dataset.themeSet===t);
+  });
+  // If map is rendered, swap its basemap to match the theme.
+  if(_map){ try{ _map.setStyle(currentBasemapUrl()); }catch(e){} }
+  // Re-render the active view (theme affects colours read from cssVar).
+  renderActiveDashboard();
+}
+function loadMapping(){ try{ return JSON.parse(localStorage.getItem(LS_MAPPING)||"{}"); }catch(e){ return {}; } }
+function saveMapping(m){ try{ localStorage.setItem(LS_MAPPING, JSON.stringify(m)); }catch(e){} }
+function loadMapView(){ try{ return Object.assign({}, State.mapView, JSON.parse(localStorage.getItem(LS_MAPVIEW)||"{}")); }catch(e){ return State.mapView; } }
+function saveMapView(){ try{ localStorage.setItem(LS_MAPVIEW, JSON.stringify(State.mapView)); }catch(e){} }
+
+/* =========================================================================
+   C. Role accessors
+   ========================================================================= */
+function hasRole(role){ return !!State.mapping[role]; }
+function val(row, role){ const c=State.mapping[role]; return c==null?null:row[c]; }
+function valNum(row, role){ return coerceNumber(val(row, role)); }
+
+function weight(r){ return valNum(r,"weight") || 0; }
+function price(r){ return valNum(r,"price") || 0; }
+function tourKm(r){ return valNum(r,"tour_km") || 0; }
+function pallets(r){ return valNum(r,"pallets") || 0; }
+
+function laneKey(r){
+  const a = val(r,"origin_city") || val(r,"origin_pc") || "?";
+  const b = val(r,"dest_city")   || val(r,"dest_pc")   || "?";
+  return String(a).trim()+" → "+String(b).trim();
+}
+function carrierKey(r){
+  const c = val(r,"carrier");
+  return (c==null||c==="") ? "(unbekannt)" : String(c);
+}
+function ownershipKey(r){
+  const v = val(r,"ownership");
+  return (v==null||v==="") ? "(unbekannt)" : String(v);
+}
+
+/* =========================================================================
+   D. KPMG colours, tooltip, D3 helpers — mirrored from the reference template.
+   ========================================================================= */
+const KPMG_SCALE = ["#00338D","#005EB8","#0091DA","#00A3A1","#483698",
+                    "#43B02A","#C6007E","#470A68","#FF8200","#FFD500"];
+function kpmgColor(i){ return KPMG_SCALE[((i%KPMG_SCALE.length)+KPMG_SCALE.length)%KPMG_SCALE.length]; }
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+const tooltip = document.getElementById("tooltip");
+function showTip(html, evt){
+  tooltip.innerHTML = html;
+  tooltip.style.opacity = "1";
+  const pad=14; let x=evt.clientX+pad, y=evt.clientY+pad;
+  const r=tooltip.getBoundingClientRect();
+  if(x+r.width>window.innerWidth)  x = evt.clientX - r.width  - pad;
+  if(y+r.height>window.innerHeight) y = evt.clientY - r.height - pad;
+  tooltip.style.left = x+"px"; tooltip.style.top = y+"px";
+}
+function hideTip(){ tooltip.style.opacity = "0"; }
+
+function makeSvg(container, height, margin){
+  container.innerHTML = "";
+  margin = margin || {top:16,right:20,bottom:40,left:60};
+  const width = Math.max(280, container.clientWidth || container.parentElement.clientWidth || 600);
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const svg = d3.select(container).append("svg")
+    .attr("width","100%").attr("height", height)
+    .attr("viewBox", `0 0 ${width} ${height}`)
+    .attr("preserveAspectRatio", "xMinYMin meet");
+  const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+  return {svg,g,width,height,innerW,innerH,margin};
+}
+function noData(container, msg){
+  container.innerHTML = `<div class="no-data">${msg || "Nicht genügend Daten für diese Sicht."}</div>`;
+}
+function legend(container, items){
+  const el = document.createElement("div"); el.className = "legend";
+  el.innerHTML = items.map(it=>`<span class="lg"><span class="sw" style="background:${it.color}"></span>${it.label}</span>`).join("");
+  container.appendChild(el);
+}
+function escHtml(s){ return String(s==null?"":s).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function escAttr(s){ return escHtml(s).replace(/"/g, "&quot;"); }
+
+/* =========================================================================
+   E. Data ingestion (SheetJS for .xlsx, JSON.parse for .geojson)
+   ========================================================================= */
+async function readWorkbook(file){
+  const buf = await file.arrayBuffer();
+  const wb  = XLSX.read(buf, {type:"array", cellDates:true});
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  if(!sheet) throw new Error("Keine Sheets in der Arbeitsmappe.");
+  const json = XLSX.utils.sheet_to_json(sheet, {defval:null, raw:true});
+  if(!json.length) throw new Error("Sheet ist leer.");
+  return json;
+}
+async function readGeoJSON(file){
+  const txt = await file.text();
+  let data; try{ data = JSON.parse(txt); }
+  catch(e){ throw new Error("Datei ist kein gültiges JSON."); }
+  if(!data || (data.type!=="FeatureCollection" && data.type!=="Feature"))
+    throw new Error("Datei ist kein GeoJSON FeatureCollection/Feature.");
+  if(data.type==="Feature") data = {type:"FeatureCollection", features:[data]};
+  data.features = (data.features||[]).filter(f=>f && f.geometry && (f.geometry.type==="LineString" || f.geometry.type==="MultiLineString"));
+  if(!data.features.length) throw new Error("GeoJSON enthält keine LineString-Geometrien.");
+  return data;
+}
+async function ingestFiles(fileList){
+  const files = Array.from(fileList);
+  if(!files.length) return;
+  State.errors = [];
+  const xlsx    = files.filter(f=>/\.xlsx?$/i.test(f.name));
+  const geojson = files.filter(f=>/\.(geo)?json$/i.test(f.name));
+  // tabular shipments
+  if(xlsx.length){
+    if(State.isSample){ State.rows=[]; State.sources=[]; State.isSample=false; }
+    const all=[]; const names=[];
+    for(const f of xlsx){
+      try{
+        const rows = await readWorkbook(f);
+        rows.forEach(r=>{ r.__source = f.name; all.push(r); });
+        names.push(f.name);
+      }catch(err){
+        State.errors.push(`${f.name}: ${err.message || "konnte nicht gelesen werden"}`);
+      }
+    }
+    if(all.length){
+      State.rows = State.rows.concat(all);
+      State.sources = State.sources.concat(names);
+      detectColumns();
+      autoMap();
+    }
+  }
+  // geojson routes
+  if(geojson.length){
+    if(State.isSample){ State.geojson=null; State.geojsonSource=null; }
+    for(const f of geojson){
+      try{
+        const g = await readGeoJSON(f);
+        State.geojson = g;
+        State.geojsonSource = f.name;
+      }catch(err){
+        State.errors.push(`${f.name}: ${err.message || "konnte nicht gelesen werden"}`);
+      }
+    }
+  }
+  if(!State.rows.length && !State.geojson){ renderEmpty(); return; }
+  if(State.rows.length && xlsx.length){
+    openMappingModal(true);   // confirm/adjust mapping before showing dashboards
+  } else {
+    refreshShell();
+    navigate(State.activeView || (dashboards.find(dashboardReady)||{}).id);
+  }
+}
+
+/* =========================================================================
+   F. Field auto-detect + mapping (regex heuristics + exact PRESETS)
+   ========================================================================= */
+function detectColumns(){
+  const set = new Set();
+  for(const r of State.rows.slice(0,500)) Object.keys(r).forEach(k=>{ if(k!=="__source") set.add(k); });
+  State.columns = Array.from(set);
+}
+
+const ROLE_PATTERNS = {
+  shipment_id:   /tour.?nr|tour.?nummer|tournummer|shipment|sendung.?nr|sendungsnummer/i,
+  tour_date:     /tour.?datum|datum|date|versand/i,
+  carrier:       /fracht.?führer.?name|frachtführername|carrier.?name|spediteur.?name/i,
+  ownership:     /eigen.*fremd|fremd.*eigen|own.*third|logistik.?modus|eigenlog/i,
+  temp_range:    /temperatur(?!erw)|temperaturbereich(?!\sErweitert)|temp\.?range/i,
+  area:          /haupt.?bereich|^bereich$|business.?area/i,
+  area_name:     /bereich.?name|area.?name/i,
+  traffic_type:  /verkehrsart.?name|verkehrsart|traffic.?type/i,
+  shipment_kind: /stückgut|stueckgut|container|shipment.?kind|sendungsart/i,
+  auf_art:       /^auf.?art$|auftrags.?art|order.?type/i,
+  weight:        /tats.*gewicht|gewicht.*kg|gross.?weight|netto.?gewicht|weight/i,
+  price:         /preis|kosten|cost|amount|freight.?charge|frachtpreis/i,
+  tour_km:       /tour.?km|km.?tour|distanz|kilometer|distance/i,
+  pallets:       /^#sp$|stellplätze|stellplaetze|pallet|loading.?slots/i,
+  origin_city:   /^a.?ort$|absender.?ort|origin.?city|von.?ort/i,
+  origin_pc:     /^a.?plz$|absender.?plz|origin.?postal|origin.?zip/i,
+  origin_country:/^a.?lkz$|absender.?land|origin.?country/i,
+  dest_city:     /^e.?ort$|empfänger.?ort|empfaenger.?ort|dest.*city|nach.?ort/i,
+  dest_pc:       /^e.?plz$|empfänger.?plz|dest.*postal|dest.*zip/i,
+  dest_country:  /^e.?lkz$|empfänger.?land|dest.*country/i,
+};
+
+const PRESETS = [{
+  id:"logistics_de",
+  label:"Logistik-Touren (DE)",
+  signature:["Tournummer","Frachtführername","Eigen- vs. Fremdlogistik","tats. Gewicht","Preis"],
+  map:{
+    shipment_id:"Tournummer",
+    tour_date:"TourDatum",
+    carrier:"Frachtführername",
+    ownership:"Eigen- vs. Fremdlogistik",
+    temp_range:"Temperaturbereich",
+    area:"Hauptbereich",
+    area_name:"Bereich Name",
+    traffic_type:"Verkehrsart Name",
+    shipment_kind:"Stückgut / Container Sped.",
+    auf_art:"AufArt",
+    weight:"tats. Gewicht",
+    price:"Preis",
+    tour_km:"TourKM",
+    pallets:"#Sp",
+    origin_city:"A-Ort",
+    origin_pc:"A-PLZ",
+    origin_country:"A-LKZ",
+    dest_city:"E-Ort",
+    dest_pc:"E-PLZ",
+    dest_country:"E-LKZ",
+  }
+}];
+function detectPreset(){
+  for(const p of PRESETS){
+    const hits = p.signature.filter(c=>State.columns.includes(c)).length;
+    if(hits >= Math.ceil(p.signature.length*0.6)) return p;
+  }
+  return null;
+}
+function looksNumeric(col){
+  let n=0, ok=0;
+  for(const r of State.rows.slice(0,200)){ const v=r[col]; if(v==null||v==="") continue; n++; if(coerceNumber(v)!=null) ok++; }
+  return n>0 && ok/n>0.7;
+}
+function looksDate(col){
+  let n=0, ok=0;
+  for(const r of State.rows.slice(0,200)){ const v=r[col]; if(v==null||v==="") continue; n++; if(coerceDate(v)) ok++; }
+  return n>0 && ok/n>0.7;
+}
+function autoMap(){
+  const saved = loadMapping();
+  const m = {}; const used = new Set();
+  const preset = detectPreset();
+  State.detectedPreset = preset ? preset.label : null;
+  if(preset){
+    for(const role in preset.map){
+      const col = preset.map[role];
+      if(State.columns.includes(col) && !used.has(col)){ m[role]=col; used.add(col); }
+    }
+  }
+  for(const role of ROLES){
+    if(m[role.key]) continue;
+    const pat = ROLE_PATTERNS[role.key];
+    if(!pat) continue;
+    const cands = State.columns.filter(c=>!used.has(c) && pat.test(c));
+    let pick = null;
+    if(role.type==="number") pick = cands.find(looksNumeric) || cands[0];
+    else if(role.type==="date") pick = cands.find(looksDate) || cands[0];
+    else pick = cands[0];
+    if(pick){ m[role.key]=pick; used.add(pick); }
+  }
+  // overlay any saved mapping whose column still exists
+  for(const role of ROLES){
+    if(saved[role.key] && State.columns.includes(saved[role.key])) m[role.key] = saved[role.key];
+  }
+  State.mapping = m;
+}
+
+function openMappingModal(initial){
+  const opts = role => `<option value="">— ohne —</option>` +
+    State.columns.map(c=>`<option value="${escAttr(c)}" ${State.mapping[role.key]===c?"selected":""}>${escHtml(c)}</option>`).join("");
+  const rows = ROLES.map(r=>`
+    <div class="map-row">
+      <div class="map-role">${escHtml(r.label)}${r.required?' <span style="color:var(--kpmg-pink)">*</span>':""}
+        <small>${escHtml(r.hint)}</small></div>
+      <select data-role="${r.key}">${opts(r)}</select>
+    </div>`).join("");
+  const overlay = document.createElement("div"); overlay.className="overlay"; overlay.id="mapOverlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Spalten zuordnen</h2>
+        <p>Verknüpfen Sie die logistischen Rollen mit den Spalten Ihrer Datei.
+           Erkannt: ${State.columns.length} Spalten · ${fmtNumber(State.rows.length)} Zeilen.
+           Pflichtfelder mit * markiert.
+           ${State.detectedPreset?`<br>Erkanntes Layout: <b>${escHtml(State.detectedPreset)}</b> — Mapping wurde vorausgefüllt, bei Bedarf anpassen.`:""}</p>
+      </div>
+      <div class="modal-body">${rows}</div>
+      <div class="modal-foot">
+        ${initial?"":'<button class="btn btn-ghost" id="mapCancel">Abbrechen</button>'}
+        <button class="btn btn-primary" id="mapApply">Mapping übernehmen</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#mapApply").onclick = ()=>{
+    const m = {};
+    overlay.querySelectorAll("select[data-role]").forEach(sel=>{ if(sel.value) m[sel.dataset.role] = sel.value; });
+    if(m.auf_art !== State.mapping.auf_art) State.aufartOff.clear();  // exclusions belong to the old column
+    State.mapping = m; saveMapping(m);
+    overlay.remove();
+    refreshShell();
+    navigate(State.activeView || (dashboards.find(dashboardReady)||{}).id);
+  };
+  const cancel = overlay.querySelector("#mapCancel");
+  if(cancel) cancel.onclick = ()=>overlay.remove();
+}
+
+/* =========================================================================
+   G. Dashboard registry
+   ========================================================================= */
+const dashboards = [];
+function registerDashboard(def){ dashboards.push(def); }
+function dashboardReady(d){ return (d.needs||[]).every(role => hasRole(role)); }
+
+/* =========================================================================
+   H. Cross-filter state + analyses
+   ========================================================================= */
+/* Rows after the global AufArt include/exclude. This is the base for ALL
+   analyses — including the 360° drilldowns and maps, which ignore the
+   click-filters but must still respect the AufArt selection. */
+function aufartKeyOf(r){
+  const v = val(r,"auf_art");
+  return (v==null||v==="") ? "(leer)" : String(v);
+}
+function baseRows(){
+  if(!hasRole("auf_art") || !State.aufartOff.size) return State.rows;
+  return State.rows.filter(r=> !State.aufartOff.has(aufartKeyOf(r)));
+}
+function filteredRowsExcept(skip){
+  let rows = baseRows();
+  for(const role in State.filters){
+    if(role===skip) continue;
+    const v = State.filters[role];
+    rows = rows.filter(r => String(val(r,role)) === String(v));
+  }
+  return rows;
+}
+function filteredRows(){ return filteredRowsExcept(null); }
+function filterCount(){ return Object.keys(State.filters).length; }
+function filterLabel(role, v){ return (ROLE_LABEL[role]||role) + ": " + v; }
+function applyFilter(role, value){
+  if(value==null || value==="(leer)" || value==="(unbekannt)" || value==="Sonstige") return;
+  if(String(State.filters[role]) === String(value)) delete State.filters[role];
+  else State.filters[role] = value;
+  renderView();
+}
+function applyFilters(obj){
+  let changed=false;
+  for(const k in obj){
+    const v = obj[k];
+    if(v==null || v==="(leer)" || v==="(unbekannt)" || v==="Sonstige") continue;
+    if(String(State.filters[k]) !== String(v)){ State.filters[k]=v; changed=true; }
+  }
+  if(changed) renderView();
+}
+function clearFilters(){ State.filters = {}; renderView(); }
+
+/* generic group-by helpers */
+function rollup(rows, role, valueFn, n){
+  valueFn = valueFn || price;
+  const roll = d3.rollups(rows, v=>d3.sum(v, valueFn), r=>{
+    const k = val(r, role);
+    return (k==null || k==="") ? "(leer)" : k;
+  });
+  let arr = roll.map(([key,value])=>({key,value})).filter(d=>d.value!==0).sort((a,b)=>b.value-a.value);
+  if(n && arr.length>n){
+    const head = arr.slice(0,n);
+    const rest = d3.sum(arr.slice(n), d=>d.value);
+    if(rest) head.push({key:"Sonstige", value:rest});
+    arr = head;
+  }
+  return arr;
+}
+function rollupBy(rows, keyFn, valueFn, n){
+  const roll = d3.rollups(rows, v=>d3.sum(v, valueFn), keyFn);
+  let arr = roll.map(([key,value])=>({key,value})).filter(d=>d.value!==0).sort((a,b)=>b.value-a.value);
+  if(n && arr.length>n){
+    const head = arr.slice(0,n);
+    const rest = d3.sum(arr.slice(n), d=>d.value);
+    if(rest) head.push({key:"Sonstige", value:rest});
+    arr = head;
+  }
+  return arr;
+}
+function distinct(rows, role){
+  if(!hasRole(role)) return null;
+  return new Set(rows.map(r=>val(r,role)).filter(v=>v!=null && v!=="")).size;
+}
+function distinctBy(rows, keyFn){
+  return new Set(rows.map(keyFn).filter(v=>v!=null && v!=="")).size;
+}
+
+/* Logistics-specific roll-ups */
+function dimSeries(rows, role, n, valueFn){
+  valueFn = valueFn || price;
+  if(!hasRole(role)) return [];
+  const total = d3.sum(rows, valueFn);
+  const items = rollup(rows, role, valueFn, n).filter(d=>d.key!=="(leer)" && d.key!=="(unbekannt)");
+  items.forEach((d,i)=>{ d.share = total ? d.value/total : 0; d.rank=i+1; });
+  items.forEach(d=>{
+    d.tip = `<b>${escHtml(d.key)}</b><br>${valueFn===price?fmtCurrency(d.value):fmtNumber(d.value)} · ${fmtPct(d.share)}<br><span class="tip-hint">Klick zum Filtern</span>`;
+  });
+  return items;
+}
+function aggregateBy(rows, keyFn, valueFn, n){
+  valueFn = valueFn || price;
+  const total = d3.sum(rows, valueFn);
+  const items = rollupBy(rows, keyFn, valueFn, n);
+  items.forEach((d,i)=>{ d.share = total ? d.value/total : 0; d.rank=i+1; });
+  return items;
+}
+
+/* For an arbitrary grouping (role or function), compute carrier-fragmentation
+   metrics: # distinct carriers, tours, weight, price, cost-per-kg. */
+function laneStats(rows){
+  if(!rows.length) return [];
+  const groups = d3.rollups(rows, vs=>{
+    const carriers = new Set(vs.map(r=>carrierKey(r)).filter(k=>k!=="(unbekannt)"));
+    return {
+      tours: vs.length,
+      weight: d3.sum(vs, weight),
+      price: d3.sum(vs, price),
+      carriers: carriers.size,
+      ownership: new Set(vs.map(r=>ownershipKey(r))).size,
+      temp: hasRole("temp_range") ? new Set(vs.map(r=>val(r,"temp_range")||"(leer)")).size : null,
+    };
+  }, r=>laneKey(r));
+  return groups.map(([key,s])=>Object.assign({key}, s))
+    .filter(d=>d.key && !/^\?+\s*→\s*\?+$/.test(d.key))
+    .sort((a,b)=>b.price-a.price);
+}
+
+/* For each (lane, carrier) pair, aggregate tours/km/cost and compute a
+   per-carrier-on-lane specific cost in €/km. Returns Map<lane, Map<carrier,stats>>. */
+function laneCarrierRates(rows){
+  const m = new Map();
+  for(const r of rows){
+    const lane = laneKey(r);
+    if(!lane || lane.indexOf("?") >= 0) continue;
+    const carrier = carrierKey(r);
+    if(carrier === "(unbekannt)") continue;
+    const km = tourKm(r), cost = price(r), w = weight(r);
+    if(!cost || !km) continue;  // need both for an honest €/km
+    let inner = m.get(lane);
+    if(!inner){ inner = new Map(); m.set(lane, inner); }
+    let c = inner.get(carrier);
+    if(!c){ c = {tours:0, km:0, cost:0, weight:0}; inner.set(carrier, c); }
+    c.tours += 1; c.km += km; c.cost += cost; c.weight += w;
+  }
+  for(const [, inner] of m){
+    for(const [, c] of inner){
+      c.eurkm = c.km>0 ? c.cost/c.km : null;
+      c.eurkg = c.weight>0 ? c.cost/c.weight : null;
+    }
+  }
+  return m;
+}
+
+/* For each lane served by ≥2 carriers (each with at least minTours tours so
+   the €/km rate is somewhat stable), quantify the savings potential as a
+   RANGE between two assumptions:
+     • lower bound (conservative): carriers above the lane's volume-weighted
+       average €/km are dialled down to the average; carriers at or below the
+       average are left untouched.
+     • upper bound (aggressive):   carriers above the lane's MIN €/km are
+       dialled down to that minimum; the min carrier itself is left untouched.
+   The aggressive bound mathematically equals totalCost − totalKm · minRate. */
+function laneSavings(rows, minTours){
+  minTours = minTours || 2;
+  const rates = laneCarrierRates(rows);
+  const out = [];
+  for(const [lane, byCarrier] of rates){
+    const arr = [];
+    for(const [carrier, c] of byCarrier){
+      if(c.eurkm == null || c.tours < minTours) continue;
+      arr.push(Object.assign({carrier}, c));
+    }
+    if(arr.length < 2) continue;
+    arr.sort((a,b)=>a.eurkm - b.eurkm);
+    const bestRate  = arr[0].eurkm;
+    const worstRate = arr[arr.length-1].eurkm;
+    const totalKm   = d3.sum(arr, d=>d.km);
+    const totalCost = d3.sum(arr, d=>d.cost);
+    const totalTours= d3.sum(arr, d=>d.tours);
+    const totalW    = d3.sum(arr, d=>d.weight);
+    const avgRate   = totalKm ? totalCost/totalKm : null;
+
+    // Aggressive (upper bound): everyone above the min drops to the min rate.
+    const savingsUpper = totalCost - totalKm * bestRate;
+
+    // Conservative (lower bound): only carriers above the lane average drop to
+    // the average. Below-average carriers stay where they are.
+    let savingsLower = 0;
+    for(const c of arr){
+      if(avgRate != null && c.eurkm > avgRate){
+        savingsLower += c.cost - c.km * avgRate;
+      }
+    }
+
+    out.push({
+      lane, carriers: arr,
+      nCarriers: arr.length,
+      tours: totalTours, km: totalKm, weight: totalW, cost: totalCost,
+      bestRate, worstRate, spread: worstRate - bestRate,
+      avgRate,
+      bestCarrier:  arr[0].carrier,
+      worstCarrier: arr[arr.length-1].carrier,
+      savingsLower, savingsUpper,
+      savingsPctLower: totalCost ? savingsLower/totalCost : 0,
+      savingsPctUpper: totalCost ? savingsUpper/totalCost : 0,
+    });
+  }
+  return out.sort((a,b)=>b.savingsUpper - a.savingsUpper);
+}
+
+/* Ownership / temperature decomposition into 3 metrics in parallel. */
+function decomposeBy(rows, role){
+  if(!hasRole(role)) return [];
+  const roll = d3.rollups(rows, vs=>({
+    tours: vs.length,
+    weight: d3.sum(vs, weight),
+    price:  d3.sum(vs, price),
+    km:     d3.sum(vs, tourKm),
+    carriers: new Set(vs.map(r=>carrierKey(r)).filter(k=>k!=="(unbekannt)")).size,
+  }), r=>{
+    const k = val(r, role); return (k==null||k==="") ? "(leer)" : k;
+  });
+  return roll.map(([key,s])=>Object.assign({key}, s))
+    .filter(d=>d.key!=="(leer)")
+    .sort((a,b)=>b.price-a.price);
+}
+
+/* ABC classifier (cost-curve), e.g. for carriers. */
+function abcClassify(items){
+  const sorted = (items||[]).slice().sort((a,b)=>b.value-a.value);
+  const grand = sorted.reduce((s,d)=>s+d.value, 0) || 1;
+  let cum=0;
+  return sorted.map((d,i)=>{ cum += d.value; const cp = cum/grand;
+    return {key:d.key, value:d.value, idx:i+1, cumPct:cp, cls: cp<=0.8?"A":(cp<=0.95?"B":"C")};
+  });
+}
+
+/* =========================================================================
+   I. KPI strip + card scaffolding
+   ========================================================================= */
+function kpiStrip(kpis){
+  return `<div class="kpi-strip">${kpis.map(k=>`
+    <div class="kpi">
+      <div class="kpi-label">${escHtml(k.label)}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-meta">${k.meta || ""}</div>
+    </div>`).join("")}</div>`;
+}
+function cardHTML(id, num, title, sub, heur){
+  return `<div class="card">
+    <div class="card-head"><div>
+      <h3 class="card-title">${num?`<span class="anum">#${num}</span>`:""}${escHtml(title)}${heur?'<span class="heur" title="Heuristik">≈ Heuristik</span>':""}</h3>
+      <div class="card-sub">${escHtml(sub||"")}</div>
+    </div></div>
+    <div class="chart-host" id="${id}"></div>
+  </div>`;
+}
+
+/* =========================================================================
+   J. Chart primitives (clickable + tooltipped)
+   ========================================================================= */
+function clickGuard(key){ return key!=="Sonstige" && key!=="(leer)" && key!=="(unbekannt)"; }
+
+function barH(host, data, opts){
+  opts = opts || {}; if(!data || !data.length){ noData(host, opts.empty); return; }
+  const fmt  = opts.fmt  || fmtCurrency;
+  const abbr = opts.abbr || fmtAbbrev;
+  const fr   = opts.filterRole;
+  const sel  = fr ? State.filters[fr] : null;
+  const dimmed = d => (sel!=null && String(sel)!==String(d.key)) ||
+                      (opts.selectedKey!=null && String(opts.selectedKey)!==String(d.key));
+  const h = opts.height || Math.max(170, data.length*26 + 38);
+  const {g,innerW,innerH} = makeSvg(host, h, {top:8,right:26,bottom:30,left:opts.left||190});
+  const x = d3.scaleLinear().domain([0, d3.max(data, d=>d.value) || 1]).nice().range([0, innerW]);
+  const y = d3.scaleBand().domain(data.map(d=>d.key)).range([0, innerH]).padding(.2);
+  g.append("g").attr("class","gridline").call(d3.axisBottom(x).ticks(5).tickSize(innerH).tickFormat(""));
+  const bars = g.selectAll(".bar").data(data).join("rect").attr("class","bar")
+    .attr("x", 0).attr("y", d=>y(d.key)).attr("height", y.bandwidth()).attr("rx", 4)
+    .attr("fill", (d,i)=> d.color || opts.color || kpmgColor(i))
+    .attr("opacity", d => dimmed(d) ? 0.3 : 1)
+    .attr("width", 0)
+    .on("mousemove", (e,d)=> showTip(d.tip || `<b>${escHtml(d.key)}</b><br>${fmt(d.value)}`, e))
+    .on("mouseleave", hideTip);
+  if(fr) bars.style("cursor","pointer").on("click", (e,d)=>{ if(clickGuard(d.key)) applyFilter(fr, d.key); });
+  else if(opts.onClick) bars.style("cursor","pointer").on("click", (e,d)=> opts.onClick(d.key));
+  if(opts.animate===false) bars.attr("width", d=>x(d.value));
+  else bars.transition().duration(550).attr("width", d=>x(d.value));
+  // Optional marker tick (e.g. lower bound on a range bar). Data points with
+  // d.marker set get a thin vertical line drawn at x(d.marker).
+  if(data.some(d=>d.marker!=null)){
+    g.selectAll(".bar-marker").data(data.filter(d=>d.marker!=null)).join("line")
+      .attr("class","bar-marker")
+      .attr("x1", d=>x(d.marker)).attr("x2", d=>x(d.marker))
+      .attr("y1", d=>y(d.key)+2).attr("y2", d=>y(d.key)+y.bandwidth()-2)
+      .attr("stroke", cssVar("--surface") || "#fff").attr("stroke-width", 2)
+      .attr("opacity", d => dimmed(d) ? 0.3 : 1)
+      .style("pointer-events","none")
+      .on("mousemove", (e,d)=> d.markerLabel ? showTip(d.markerLabel, e) : null)
+      .on("mouseleave", hideTip);
+  }
+  const ya = g.append("g").attr("class","axis").call(d3.axisLeft(y).tickSize(0));
+  ya.select(".domain").remove();
+  ya.selectAll("text").each(function(){
+    const t = d3.select(this); const s = t.text();
+    if(s.length>28){ t.text(s.slice(0,27)+"…"); t.append("title").text(s); }
+  });
+  g.append("g").attr("class","axis").attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).ticks(5).tickFormat(abbr));
+}
+
+function barV(host, data, opts){
+  opts = opts || {}; if(!data || !data.length){ noData(host, opts.empty); return; }
+  const fmt = opts.fmt || fmtCurrency, abbr = opts.abbr || fmtAbbrev;
+  const fr = opts.filterRole, sel = fr ? State.filters[fr] : null;
+  const {g,innerW,innerH} = makeSvg(host, opts.height||340, {top:12,right:16,bottom:opts.bottom||96,left:64});
+  const x = d3.scaleBand().domain(data.map(d=>d.key)).range([0, innerW]).padding(.22);
+  const y = d3.scaleLinear().domain([0, d3.max(data, d=>d.value) || 1]).nice().range([innerH, 0]);
+  g.append("g").attr("class","gridline").call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(""));
+  const bars = g.selectAll(".bar").data(data).join("rect").attr("class","bar")
+    .attr("x", d=>x(d.key)).attr("width", x.bandwidth()).attr("rx", 4).attr("y", innerH).attr("height", 0)
+    .attr("fill", (d,i)=> d.color || opts.color || kpmgColor(i))
+    .attr("opacity", d => sel!=null && String(sel)!==String(d.key) ? 0.3 : 1)
+    .on("mousemove", (e,d)=> showTip(d.tip || `<b>${escHtml(d.key)}</b><br>${fmt(d.value)}`, e))
+    .on("mouseleave", hideTip);
+  if(fr) bars.style("cursor","pointer").on("click", (e,d)=>{ if(clickGuard(d.key)) applyFilter(fr, d.key); });
+  bars.transition().duration(550).attr("y", d=>y(d.value)).attr("height", d=>innerH-y(d.value));
+  g.append("g").attr("class","axis").attr("transform", `translate(0,${innerH})`).call(d3.axisBottom(x).tickSize(0))
+    .selectAll("text").attr("transform","rotate(-40)").style("text-anchor","end")
+    .each(function(){ const t=d3.select(this), s=t.text(); if(s.length>20) t.text(s.slice(0,19)+"…"); });
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(5).tickFormat(abbr));
+}
+
+function donut(host, data, opts){
+  opts = opts || {}; if(!data || !data.length){ noData(host, opts.empty); return; }
+  const fr = opts.filterRole, sel = fr ? State.filters[fr] : null;
+  const fmt = opts.fmt || fmtCurrency;
+  const total = d3.sum(data, d=>d.value); const h = opts.height || 300; host.innerHTML = "";
+  const width = Math.max(280, host.clientWidth || host.parentElement.clientWidth || 500);
+  const r = Math.min(width, h)/2 - 10;
+  const svg = d3.select(host).append("svg").attr("width","100%").attr("height", h)
+    .attr("viewBox", `0 0 ${width} ${h}`);
+  const g = svg.append("g").attr("transform", `translate(${width/2},${h/2})`);
+  const pie = d3.pie().value(d=>d.value).sort(null);
+  const arc = d3.arc().innerRadius(r*0.62).outerRadius(r);
+  const paths = g.selectAll("path").data(pie(data)).join("path").attr("d", arc)
+    .attr("fill", (d,i)=> d.data.color || kpmgColor(i))
+    .attr("stroke", cssVar("--surface") || "#fff").attr("stroke-width", 2)
+    .attr("opacity", d => sel!=null && String(sel)!==String(d.data.key) ? 0.35 : 1)
+    .on("mousemove", (e,d)=> showTip(d.data.tip || `<b>${escHtml(d.data.key)}</b><br>${fmt(d.data.value)} · ${fmtPct(total?d.data.value/total:0)}`, e))
+    .on("mouseleave", hideTip);
+  if(fr) paths.style("cursor","pointer").on("click", (e,d)=>{ if(clickGuard(d.data.key)) applyFilter(fr, d.data.key); });
+  g.append("text").attr("text-anchor","middle").attr("dy","-0.1em").attr("fill", cssVar("--text"))
+    .style("font-size","20px").style("font-weight","800").text(opts.centerValue || fmtAbbrev(total));
+  g.append("text").attr("text-anchor","middle").attr("dy","1.5em").attr("fill", cssVar("--text-muted"))
+    .style("font-size","12px").text(opts.centerLabel || "Gesamt");
+  legend(host, data.map((d,i)=>({label:`${d.key} (${fmtPct(total?d.value/total:0)})`, color:d.color||kpmgColor(i)})));
+}
+
+function abcCurve(host, items, opts){
+  opts = opts || {}; const data = abcClassify(items);
+  if(!data.length){ noData(host, opts.empty); return; }
+  const fr = opts.filterRole;
+  const colors = {A: cssVar("--kpmg-blue")||"#00338D", B: cssVar("--kpmg-light-blue")||"#0091DA", C: cssVar("--kpmg-teal")||"#00A3A1"};
+  const {g,innerW,innerH} = makeSvg(host, opts.height||340, {top:14,right:52,bottom:34,left:64});
+  const x  = d3.scaleBand().domain(data.map(d=>d.idx)).range([0,innerW]).padding(.06);
+  const y  = d3.scaleLinear().domain([0, d3.max(data,d=>d.value)||1]).nice().range([innerH,0]);
+  const y2 = d3.scaleLinear().domain([0, 1]).range([innerH, 0]);
+  g.append("g").attr("class","gridline").call(d3.axisLeft(y).ticks(5).tickSize(-innerW).tickFormat(""));
+  const bars = g.selectAll(".bar").data(data).join("rect").attr("class","bar")
+    .attr("x", d=>x(d.idx)).attr("width", x.bandwidth())
+    .attr("y", d=>y(d.value)).attr("height", d=>innerH-y(d.value))
+    .attr("fill", d=>colors[d.cls])
+    .on("mousemove", (e,d)=> showTip(`<b>#${d.idx} ${escHtml(d.key)}</b><br>${fmtCurrency(d.value)}<br>Klasse ${d.cls} · kum. ${fmtPct(d.cumPct)}` + (fr?`<br><span class="tip-hint">Klick zum Filtern</span>`:""), e))
+    .on("mouseleave", hideTip);
+  if(fr) bars.style("cursor","pointer").on("click", (e,d)=>{ if(clickGuard(d.key)) applyFilter(fr, d.key); });
+  const line = d3.line().x(d=>x(d.idx)+x.bandwidth()/2).y(d=>y2(d.cumPct)).curve(d3.curveMonotoneX);
+  g.append("path").datum(data).attr("fill","none")
+    .attr("stroke", cssVar("--kpmg-purple")||"#483698").attr("stroke-width", 2.5).attr("d", line);
+  [0.8, 0.95].forEach(p => g.append("line")
+    .attr("x1", 0).attr("x2", innerW).attr("y1", y2(p)).attr("y2", y2(p))
+    .attr("stroke", cssVar("--text-faint")).attr("stroke-dasharray","4 3").attr("opacity", .55));
+  const step = Math.ceil(data.length/12);
+  g.append("g").attr("class","axis").attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(x).tickValues(x.domain().filter((d,i)=>!(i%step))));
+  g.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(5).tickFormat(fmtAbbrev));
+  g.append("g").attr("class","axis").attr("transform", `translate(${innerW},0)`)
+    .call(d3.axisRight(y2).ticks(5).tickFormat(d3.format(".0%")));
+  const c = {A:data.filter(d=>d.cls==="A").length, B:data.filter(d=>d.cls==="B").length, C:data.filter(d=>d.cls==="C").length};
+  legend(host, [
+    {label:`A · 80% (${c.A})`, color:colors.A},
+    {label:`B · 15% (${c.B})`, color:colors.B},
+    {label:`C · 5% (${c.C})`,  color:colors.C},
+    {label:"kumulativ %", color: cssVar("--kpmg-purple")},
+  ]);
+}
+
+function table(host, columns, rows, opts){
+  opts = opts || {}; if(!rows || !rows.length){ noData(host, opts.empty); return; }
+  const thead = `<tr>${columns.map(c=>`<th style="${c.num?'text-align:right':''}">${escHtml(c.label)}</th>`).join("")}</tr>`;
+  const body  = rows.map((r,i)=>{
+    const isSel = opts.rowKey && opts.selectedKey!=null && String(opts.rowKey(r))===String(opts.selectedKey);
+    return `<tr data-ri="${i}" class="${isSel?"sel":""}">${columns.map(c=>`<td style="${c.num?'text-align:right':''}">${c.render(r)}</td>`).join("")}</tr>`;
+  }).join("");
+  host.innerHTML = `<div class="tbl-wrap"><table class="data-table"><thead>${thead}</thead><tbody>${body}</tbody></table></div>`;
+  if(opts.rowKey && opts.onRowClick){
+    host.querySelectorAll("tbody tr").forEach(tr=>{
+      tr.style.cursor = "pointer";
+      tr.onclick = ()=> opts.onRowClick(opts.rowKey(rows[+tr.dataset.ri]));
+    });
+  }
+}
+
+/* Range chart: one row per lane, dots = carriers' €/km (sized by tours),
+   horizontal line = min..max range, vertical dashed tick = volume-weighted
+   average. Used by the savings-potential view in the lanes dashboard. */
+function laneSpread(host, lanes, opts){
+  opts = opts || {};
+  if(!lanes || !lanes.length){ noData(host, opts.empty); return; }
+  const h = Math.max(180, lanes.length * 30 + 38);
+  const {g, innerW, innerH} = makeSvg(host, h, {top:10, right:96, bottom:30, left:opts.left || 220});
+  const allRates = lanes.flatMap(L => L.carriers.map(c => c.eurkm)).filter(v => v != null);
+  if(!allRates.length){ noData(host, opts.empty); return; }
+  const xMin = Math.max(0, d3.min(allRates) * 0.9);
+  const xMax = d3.max(allRates) * 1.05;
+  const x = d3.scaleLinear().domain([xMin, xMax]).nice().range([0, innerW]);
+  const y = d3.scaleBand().domain(lanes.map(L => L.lane)).range([0, innerH]).padding(0.3);
+  g.append("g").attr("class","gridline")
+    .call(d3.axisBottom(x).ticks(5).tickSize(innerH).tickFormat(""));
+  const row = g.selectAll(".lr").data(lanes).join("g").attr("class","lr")
+    .attr("transform", L => `translate(0, ${y(L.lane) + y.bandwidth()/2})`)
+    .attr("opacity", L => opts.selectedKey!=null && L.lane!==opts.selectedKey ? 0.25 : 1);
+  if(opts.onClick) row.style("cursor","pointer").on("click", (e,L)=> opts.onClick(L.lane));
+  // background range line (min..max)
+  row.append("line")
+    .attr("x1", L => x(L.bestRate)).attr("x2", L => x(L.worstRate))
+    .attr("y1", 0).attr("y2", 0)
+    .attr("stroke", cssVar("--border") || "#ccc")
+    .attr("stroke-width", 3).attr("stroke-linecap","round");
+  // volume-weighted average tick
+  row.append("line")
+    .attr("x1", L => x(L.avgRate)).attr("x2", L => x(L.avgRate))
+    .attr("y1", -6).attr("y2", 6)
+    .attr("stroke", cssVar("--text-muted") || "#888")
+    .attr("stroke-width", 1.5).attr("stroke-dasharray","2 2");
+  // per-carrier dots, sized by tour count
+  row.each(function(L){
+    const sel = d3.select(this);
+    const maxTours = d3.max(L.carriers, c => c.tours) || 1;
+    const rScale = d3.scaleSqrt().domain([0, maxTours]).range([3, 9]);
+    L.carriers.forEach((c, i) => {
+      const isBest  = i === 0;
+      const isWorst = i === L.carriers.length - 1;
+      const fill = isBest  ? (cssVar("--kpmg-green") || "#43B02A")
+                : isWorst  ? (cssVar("--kpmg-pink")  || "#C6007E")
+                           : (cssVar("--kpmg-light-blue") || "#0091DA");
+      sel.append("circle")
+        .attr("cx", x(c.eurkm)).attr("cy", 0).attr("r", rScale(c.tours))
+        .attr("fill", fill)
+        .attr("stroke", cssVar("--surface") || "#fff").attr("stroke-width", 1.5)
+        .style("cursor", "help")
+        .on("mousemove", e => showTip(
+          `<b>${escHtml(L.lane)}</b><br>${escHtml(c.carrier)}` +
+          (isBest  ? ' <span class="tip-hint">(günstigster)</span>' :
+           isWorst ? ' <span class="tip-hint">(teuerster)</span>'   : '') +
+          `<br>${fmtCurrency2(c.eurkm)} / km · ${fmtNumber(c.tours)} Touren · ${fmtKm(Math.round(c.km))}` +
+          `<br>Σ Kosten: ${fmtCurrency(c.cost)}`, e))
+        .on("mouseleave", hideTip);
+    });
+    // savings range label at the right (conservative — aggressive)
+    sel.append("text")
+      .attr("x", innerW + 8).attr("y", -2).attr("dy", "0.34em")
+      .attr("fill", cssVar("--text-muted") || "#888")
+      .style("font-size", "10.5px").style("font-weight", "600")
+      .text(fmtAbbrev(L.savingsLower) + " €")
+      .append("title").text(`Konservatives Einsparpotenzial: ${fmtCurrency(L.savingsLower)} (${fmtPct(L.savingsPctLower)})`);
+    sel.append("text")
+      .attr("x", innerW + 8).attr("y", 10).attr("dy", "0.34em")
+      .attr("fill", cssVar("--kpmg-pink") || "#C6007E")
+      .style("font-size", "11.5px").style("font-weight", "700")
+      .text(fmtAbbrev(L.savingsUpper) + " €")
+      .append("title").text(`Aggressives Einsparpotenzial: ${fmtCurrency(L.savingsUpper)} (${fmtPct(L.savingsPctUpper)})`);
+  });
+  const ya = g.append("g").attr("class","axis").call(d3.axisLeft(y).tickSize(0));
+  ya.select(".domain").remove();
+  ya.selectAll("text").each(function(){
+    const t = d3.select(this), s = t.text();
+    if(s.length > 32){ t.text(s.slice(0, 31) + "…"); t.append("title").text(s); }
+  });
+  g.append("g").attr("class","axis").attr("transform", `translate(0, ${innerH})`)
+    .call(d3.axisBottom(x).ticks(5).tickFormat(v => fmtCurrency2(v) + "/km"));
+  legend(host, [
+    {label:"günstigster Frachtführer", color: cssVar("--kpmg-green")      || "#43B02A"},
+    {label:"teuerster Frachtführer",   color: cssVar("--kpmg-pink")       || "#C6007E"},
+    {label:"weitere Frachtführer",     color: cssVar("--kpmg-light-blue") || "#0091DA"},
+    {label:"Ø €/km (volumen-gewichtet)", color: cssVar("--text-muted")    || "#888"},
+  ]);
+}
+
+/* =========================================================================
+   K. DASHBOARDS
+   ========================================================================= */
+registerDashboard({
+  id:"overview", title:"Übersicht", group:"Diagnose",
+  subtitle:"Headline-KPIs, Logistik-Modus & Temperatur-Mix, Top-Frachtführer und Lane-Fragmentierung.",
+  needs:["price"],
+  render(root){
+    const rows = filteredRows();
+    const total = d3.sum(rows, price);
+    const tWeight = d3.sum(rows, weight);
+    const tKm = d3.sum(rows, tourKm);
+    const nTours = rows.length;
+    const nCarriers = distinctBy(rows, r=>carrierKey(r)) - (rows.some(r=>carrierKey(r)==="(unbekannt)")?1:0);
+    const nLanes = distinctBy(rows, r=>laneKey(r));
+    const eurKg = tWeight ? total/tWeight : null;
+    const eurKm = tKm     ? total/tKm     : null;
+
+    root.innerHTML = kpiStrip([
+      {label:"Touren / Sendungen", value: fmtNumber(nTours),                meta:"in Auswahl"},
+      {label:"Σ Frachtkosten",     value: fmtCurrency(total),               meta:"€"},
+      {label:"Σ Gewicht",          value: fmtWeight(tWeight),               meta:tWeight?"transportiert":"—"},
+      {label:"Frachtführer",       value: fmtNumber(Math.max(0,nCarriers)), meta:"eindeutig"},
+      {label:"Lanes (A→E)",        value: fmtNumber(nLanes),                meta:"eindeutig"},
+      {label:"Ø €/kg",             value: eurKg!=null?fmtCurrency2(eurKg):"—",  meta:"Fracht / kg"},
+      {label:"Ø €/km",             value: eurKm!=null?fmtCurrency2(eurKm):"—",  meta:"Fracht / km"},
+    ]) + `
+    <div class="grid grid-2">
+      ${cardHTML("ov-own", 1, "Eigen- vs. Fremdlogistik", "Kostenanteil je Logistik-Modus")}
+      ${cardHTML("ov-temp", 2, "Temperaturbereich",       "Kostenanteil je Temperaturbereich")}
+    </div>
+    <div class="grid grid-2" style="margin-top:18px">
+      ${cardHTML("ov-carr", 3, "Top-10 Frachtführer (Kosten)", "Größte Kostentreiber")}
+      ${cardHTML("ov-lane", 4, "Top-10 Lanes (Kosten)",        "Höchstes Volumen je Absender → Empfänger")}
+    </div>
+    <div class="grid" style="margin-top:18px">
+      ${cardHTML("ov-frag", 5, "Lane-Fragmentierung (Mehrfach-Frachtführer)", "Lanes mit den meisten unterschiedlichen Frachtführern", true)}
+    </div>`;
+
+    donut(byId("ov-own"),  dimSeries(filteredRowsExcept("ownership"), "ownership"),
+      {filterRole:"ownership", empty:"Spalte „Eigen- vs. Fremdlogistik“ zuordnen."});
+    donut(byId("ov-temp"), dimSeries(filteredRowsExcept("temp_range"), "temp_range"),
+      {filterRole:"temp_range", empty:"Spalte „Temperaturbereich“ zuordnen."});
+    barH(byId("ov-carr"),  dimSeries(filteredRowsExcept("carrier"), "carrier", 10),
+      {filterRole:"carrier", empty:"Spalte „Frachtführer“ zuordnen."});
+
+    // Lane top by cost
+    const lanes = aggregateBy(rows, laneKey, price, 10).filter(d=>d.key && !d.key.includes("?"));
+    lanes.forEach(d=>{ d.tip = `<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.value)} · ${fmtPct(d.share||0)}`; });
+    barH(byId("ov-lane"), lanes, {empty:"Quell- und Ziel-Orte zuordnen."});
+
+    // Lane fragmentation table (top 12 most-fragmented lanes that have >1 carrier)
+    const ls = laneStats(rows).filter(d=>d.carriers>1).sort((a,b)=>b.carriers-a.carriers).slice(0,12);
+    table(byId("ov-frag"), [
+      {label:"Lane (Absender → Empfänger)", render:r=>escHtml(r.key)},
+      {label:"# Frachtführer", num:true, render:r=>fmtNumber(r.carriers)},
+      {label:"# Touren",       num:true, render:r=>fmtNumber(r.tours)},
+      {label:"Σ Gewicht",      num:true, render:r=>fmtWeight(r.weight)},
+      {label:"Σ Kosten",       num:true, render:r=>fmtCurrency(r.price)},
+    ], ls, {empty:"Keine fragmentierten Lanes."});
+  }
+});
+
+registerDashboard({
+  id:"ownership", title:"Eigen vs. Fremd", group:"Effizienz",
+  subtitle:"Detaillierter Vergleich von Eigenlogistik und Fremdlogistik nach Kosten, Gewicht, Distanz und Effizienz.",
+  needs:["price","ownership"],
+  render(root){
+    const rows = filteredRows();
+    const dec = decomposeBy(rows, "ownership");
+    const sumP = d3.sum(rows, price), sumW = d3.sum(rows, weight), sumK = d3.sum(rows, tourKm);
+
+    // Top KPI cards: ratio + per-row efficiency.
+    const eigen = dec.find(d=>/eigen/i.test(d.key));
+    const fremd = dec.find(d=>/fremd/i.test(d.key));
+    const kpis = [
+      {label:"Σ Frachtkosten", value: fmtCurrency(sumP), meta:"in Auswahl"},
+      {label:"Anteil Eigenlogistik (€)", value: eigen ? fmtPct(eigen.price/(sumP||1)) : "—", meta: eigen?fmtCurrency(eigen.price):"—"},
+      {label:"Anteil Fremdlogistik (€)", value: fremd ? fmtPct(fremd.price/(sumP||1)) : "—", meta: fremd?fmtCurrency(fremd.price):"—"},
+      {label:"Σ Gewicht (Eigen / Fremd)", value: `${fmtWeight(eigen?eigen.weight:0)} / ${fmtWeight(fremd?fremd.weight:0)}`, meta:"transportiert"},
+      {label:"Ø €/kg (Eigen / Fremd)",   value: `${eigen && eigen.weight?fmtCurrency2(eigen.price/eigen.weight):"—"} / ${fremd && fremd.weight?fmtCurrency2(fremd.price/fremd.weight):"—"}`, meta:"Effizienz"},
+    ];
+
+    root.innerHTML = kpiStrip(kpis) + `
+      <div class="grid grid-2">
+        ${cardHTML("ow-cost", 1, "Kostenverteilung", "Σ Kosten je Logistik-Modus")}
+        ${cardHTML("ow-weight", 2, "Gewichts-Verteilung", "Σ transportiertes Gewicht")}
+      </div>
+      <div class="grid grid-2" style="margin-top:18px">
+        ${cardHTML("ow-eurkg",  3, "Ø €/kg (Effizienz)",  "Kleinerer Wert = effizienter")}
+        ${cardHTML("ow-eurkm",  4, "Ø €/km (Effizienz)",  "Frachtkosten je Tour-Kilometer")}
+      </div>
+      <div class="grid" style="margin-top:18px">
+        ${cardHTML("ow-bytemp", 5, "Logistik-Modus je Temperaturbereich","Frisch/Gefroren-Anteile")}
+      </div>`;
+
+    // Cost bar + weight bar
+    const colors = {Eigenlogistik: cssVar("--kpmg-blue"), Fremdlogistik: cssVar("--kpmg-pink")};
+    const colorFor = k => colors[k] || (/eigen/i.test(k)?cssVar("--kpmg-blue"):(/fremd/i.test(k)?cssVar("--kpmg-pink"):cssVar("--kpmg-teal")));
+
+    const costSeries = dec.map(d=>({
+      key:d.key, value:d.price, color:colorFor(d.key),
+      tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.price)} · ${fmtPct(sumP?d.price/sumP:0)}<br>${fmtNumber(d.tours)} Touren · ${fmtWeight(d.weight)}<br><span class="tip-hint">Klick zum Filtern</span>`
+    }));
+    const wSeries = dec.map(d=>({
+      key:d.key, value:d.weight, color:colorFor(d.key),
+      tip:`<b>${escHtml(d.key)}</b><br>${fmtWeight(d.weight)} · ${fmtPct(sumW?d.weight/sumW:0)}<br><span class="tip-hint">Klick zum Filtern</span>`
+    }));
+    barH(byId("ow-cost"),   costSeries, {filterRole:"ownership", fmt:fmtCurrency, abbr:fmtAbbrev});
+    barH(byId("ow-weight"), wSeries,    {filterRole:"ownership", fmt:fmtWeight,   abbr:v=>fmtAbbrev(v)+" kg"});
+
+    // €/kg + €/km comparison
+    const eurkgSeries = dec.filter(d=>d.weight>0).map(d=>({
+      key:d.key, value:d.price/d.weight, color:colorFor(d.key),
+      tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency2(d.price/d.weight)} / kg<br>${fmtCurrency(d.price)} Kosten · ${fmtWeight(d.weight)}`
+    }));
+    const eurkmSeries = dec.filter(d=>d.km>0).map(d=>({
+      key:d.key, value:d.price/d.km, color:colorFor(d.key),
+      tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency2(d.price/d.km)} / km<br>${fmtCurrency(d.price)} Kosten · ${fmtKm(d.km)}`
+    }));
+    barH(byId("ow-eurkg"), eurkgSeries, {fmt:fmtCurrency2, abbr:fmtCurrency2, empty:"Gewicht zuordnen."});
+    barH(byId("ow-eurkm"), eurkmSeries, {fmt:fmtCurrency2, abbr:fmtCurrency2, empty:"Tour-KM zuordnen."});
+
+    // Cross-decomposition: ownership × temperature
+    renderCrossBar(byId("ow-bytemp"), rows, "temp_range", "ownership", colorFor, {empty:"Temperaturbereich zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"temperature", title:"Temperaturbereich", group:"Effizienz",
+  subtitle:"Frisch- vs. Tiefkühl-Logistik: Kosten, Gewicht, Effizienz, Frachtführer-Mix.",
+  needs:["price","temp_range"],
+  render(root){
+    const rows = filteredRows();
+    const dec = decomposeBy(rows, "temp_range");
+    const sumP = d3.sum(rows, price);
+
+    const tempColors = {
+      Frisch: cssVar("--kpmg-green"), Gefroren: cssVar("--kpmg-light-blue"),
+      Tiefkühl: cssVar("--kpmg-light-blue"), Trocken: cssVar("--kpmg-orange"),
+    };
+    const colorFor = k => tempColors[k] ||
+      (/frisch/i.test(k)?cssVar("--kpmg-green"):(/gefr|tiefk/i.test(k)?cssVar("--kpmg-light-blue"):(/trocken/i.test(k)?cssVar("--kpmg-orange"):cssVar("--kpmg-teal"))));
+
+    const kpis = [
+      {label:"Σ Frachtkosten", value: fmtCurrency(sumP), meta:"in Auswahl"},
+      ...dec.slice(0,3).map(d => ({
+        label:`Σ ${d.key}`,
+        value: fmtCurrency(d.price),
+        meta: `${fmtPct(sumP?d.price/sumP:0)} · ${fmtWeight(d.weight)} · ${d.weight?fmtCurrency2(d.price/d.weight)+" / kg":""}`
+      }))
+    ];
+
+    root.innerHTML = kpiStrip(kpis) + `
+      <div class="grid grid-2">
+        ${cardHTML("tp-cost", 1, "Kostenanteil je Temperaturbereich", "Σ Kosten")}
+        ${cardHTML("tp-eff",  2, "Ø €/kg je Temperaturbereich",       "Effizienz-Vergleich")}
+      </div>
+      <div class="grid" style="margin-top:18px">
+        ${cardHTML("tp-bycarr", 3, "Temperatur-Mix je Frachtführer (Top-10)", "Wer fährt welche Temperaturen?")}
+      </div>`;
+
+    const costSeries = dec.map(d=>({
+      key:d.key, value:d.price, color:colorFor(d.key),
+      tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.price)} · ${fmtPct(sumP?d.price/sumP:0)}<br>${fmtNumber(d.tours)} Touren · ${fmtWeight(d.weight)}<br><span class="tip-hint">Klick zum Filtern</span>`
+    }));
+    barH(byId("tp-cost"), costSeries, {filterRole:"temp_range"});
+
+    const effSeries = dec.filter(d=>d.weight>0).map(d=>({
+      key:d.key, value:d.price/d.weight, color:colorFor(d.key),
+      tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency2(d.price/d.weight)} / kg<br>${fmtCurrency(d.price)} · ${fmtWeight(d.weight)}`
+    }));
+    barH(byId("tp-eff"), effSeries, {fmt:fmtCurrency2, abbr:fmtCurrency2, empty:"Gewicht zuordnen."});
+
+    renderCrossBar(byId("tp-bycarr"), rows, "carrier", "temp_range", colorFor, {topN:10, empty:"Frachtführer zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"carriers", title:"Frachtführer", group:"Effizienz",
+  subtitle:"Konzentration, ABC-Klassifizierung und Effizienz der Frachtführer-Basis.",
+  needs:["price","carrier"],
+  render(root){
+    const rows = filteredRows();
+    const allCarriers = aggregateBy(rows, r=>carrierKey(r), price)
+      .filter(d=>d.key!=="(unbekannt)" && d.key!=="Sonstige");
+    const total = d3.sum(rows, price);
+
+    const top1 = allCarriers[0];
+    const cr3 = allCarriers.slice(0,3).reduce((s,d)=>s+d.value, 0);
+    const kpis = [
+      {label:"Frachtführer (gesamt)", value: fmtNumber(allCarriers.filter(d=>d.key!=="(unbekannt)").length), meta:"eindeutig"},
+      {label:"Top-1 Anteil", value: top1?fmtPct(top1.value/(total||1)):"—", meta: top1?escHtml(String(top1.key).slice(0,40)):"—"},
+      {label:"Top-3 Anteil", value: total?fmtPct(cr3/total):"—", meta:"Konzentration"},
+      {label:"Σ Frachtkosten", value: fmtCurrency(total), meta:"in Auswahl"},
+    ];
+
+    root.innerHTML = kpiStrip(kpis) + `
+      <div class="grid">
+        ${cardHTML("cr-top", 1, "Top-30 Frachtführer (Kosten)", "Klick filtert · sortiert nach Σ Kosten")}
+      </div>
+      <div class="grid grid-2" style="margin-top:18px">
+        ${cardHTML("cr-abc",  2, "ABC-Analyse Frachtführer",         "A=80%, B=15%, C=5% der Kosten")}
+        ${cardHTML("cr-tours",3, "Top-Frachtführer nach Tour-Anzahl","Volumen-Sicht (Anzahl Touren)")}
+      </div>
+      <div class="grid grid-2" style="margin-top:18px">
+        ${cardHTML("cr-eurkg", 4, "Effizienz je Frachtführer (Ø €/kg, Top-15 nach Kosten)", "Niedriger Wert = günstiger pro kg")}
+        ${cardHTML("cr-lanes", 5, "Lanes je Frachtführer (Top-15)",                          "Streuung der bedienten Strecken")}
+      </div>`;
+
+    // Top-30 by cost
+    const top30 = aggregateBy(rows, r=>carrierKey(r), price, 30).filter(d=>d.key!=="(unbekannt)");
+    top30.forEach(d=>{ d.tip = `<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.value)} · ${fmtPct(d.share||0)}<br>Rang #${d.rank}<br><span class="tip-hint">Klick zum Filtern</span>`; });
+    barH(byId("cr-top"), top30, {filterRole:"carrier", height:760});
+
+    abcCurve(byId("cr-abc"), allCarriers.filter(d=>d.key!=="(unbekannt)"), {filterRole:"carrier"});
+
+    // Top by tour count
+    const byTours = d3.rollups(rows, vs=>vs.length, r=>carrierKey(r))
+      .map(([key,value])=>({key,value}))
+      .filter(d=>d.key!=="(unbekannt)")
+      .sort((a,b)=>b.value-a.value).slice(0,20);
+    byTours.forEach(d=>{ d.tip = `<b>${escHtml(d.key)}</b><br>${fmtNumber(d.value)} Touren<br><span class="tip-hint">Klick zum Filtern</span>`; });
+    barH(byId("cr-tours"), byTours, {filterRole:"carrier", fmt:fmtNumber, abbr:fmtNumber, color:cssVar("--kpmg-medium-blue")});
+
+    // Ø €/kg per carrier (top 15 by cost, with weight>0)
+    const top15keys = new Set(top30.slice(0,15).map(d=>d.key));
+    const eff = d3.rollups(rows.filter(r=>top15keys.has(carrierKey(r))), vs=>{
+      const w = d3.sum(vs, weight), p = d3.sum(vs, price);
+      return {price:p, weight:w, eurkg: w?p/w:null};
+    }, r=>carrierKey(r))
+      .map(([key,s])=>({key, value: s.eurkg, price:s.price, weight:s.weight}))
+      .filter(d=>d.value!=null)
+      .sort((a,b)=>a.value-b.value);
+    eff.forEach(d=>{ d.tip = `<b>${escHtml(d.key)}</b><br>${fmtCurrency2(d.value)} / kg<br>${fmtCurrency(d.price)} · ${fmtWeight(d.weight)}`; d.color=cssVar("--kpmg-teal"); });
+    barH(byId("cr-eurkg"), eff, {fmt:fmtCurrency2, abbr:fmtCurrency2, empty:"Gewicht zuordnen."});
+
+    // Lanes per carrier
+    const byLanes = d3.rollups(rows, vs=>new Set(vs.map(r=>laneKey(r))).size, r=>carrierKey(r))
+      .map(([key,value])=>({key,value}))
+      .filter(d=>d.key!=="(unbekannt)")
+      .sort((a,b)=>b.value-a.value).slice(0,15);
+    byLanes.forEach(d=>{ d.tip = `<b>${escHtml(d.key)}</b><br>${fmtNumber(d.value)} Lanes bedient<br><span class="tip-hint">Klick zum Filtern</span>`; });
+    barH(byId("cr-lanes"), byLanes, {filterRole:"carrier", fmt:fmtNumber, abbr:fmtNumber, color:cssVar("--kpmg-purple")});
+  }
+});
+
+registerDashboard({
+  id:"lanes", title:"Lanes & Fragmentierung", group:"Effizienz",
+  subtitle:"Lanes mit mehreren Frachtführern: €/km-Spread, Bündelungs- und Best-Rate-Einsparpotenzial.",
+  needs:["price"],
+  render(root){
+    const rows  = filteredRows();
+    const ls    = laneStats(rows);
+    const total = d3.sum(rows, price);
+    const fragmented = ls.filter(d=>d.carriers>1);
+    const fragSpend  = fragmented.reduce((s,d)=>s+d.price, 0);
+    const sav        = hasRole("tour_km") ? laneSavings(rows, 2) : [];
+    const sumSavLower = d3.sum(sav, d=>d.savingsLower);
+    const sumSavUpper = d3.sum(sav, d=>d.savingsUpper);
+    const avgSpread   = sav.length ? d3.mean(sav, d=>d.spread) : null;
+
+    const kpis = [
+      {label:"Lanes (eindeutig)", value: fmtNumber(ls.length), meta:"Absender → Empfänger"},
+      {label:"Mehrfach-Frachtführer", value: fmtNumber(fragmented.length),
+         meta:`${fmtPct(ls.length?fragmented.length/ls.length:0)} aller Lanes`},
+      {label:"Kosten auf fragmentierten Lanes", value: fmtCurrency(fragSpend),
+         meta: `${fmtPct(total?fragSpend/total:0)} der Gesamtkosten`},
+      {label:"Einsparpotenzial konservativ",
+         value: hasRole("tour_km")?fmtCurrency(sumSavLower):"—",
+         meta:  hasRole("tour_km")?`${fmtPct(fragSpend?sumSavLower/fragSpend:0)} · über-Schnitt → Schnitt`:"Tour-KM zuordnen"},
+      {label:"Einsparpotenzial aggressiv",
+         value: hasRole("tour_km")?fmtCurrency(sumSavUpper):"—",
+         meta:  hasRole("tour_km")?`${fmtPct(fragSpend?sumSavUpper/fragSpend:0)} · über-Min → Min`:"Tour-KM zuordnen"},
+      {label:"Ø €/km-Spread", value: avgSpread!=null?fmtCurrency2(avgSpread)+"/km":"—",
+         meta:"ø über alle Mehrfach-Lanes"},
+    ];
+
+    // drop a stale selection that no longer exists in the current data slice
+    if(State.selLane && !ls.some(d=>d.key===State.selLane)) State.selLane = null;
+
+    root.innerHTML = kpiStrip(kpis) + `
+      <div class="scenario-banner" style="background:var(--surface-2);border:1px solid var(--border);padding:10px 14px;border-radius:10px;font-size:12.5px;color:var(--text-muted);margin-bottom:18px">
+        ⚡ <b>Lese-Hilfe:</b> Auf jeder Lane mit mindestens 2 Frachtführern (≥2 Touren je Frachtführer) wird die spezifische Fracht in <b>€/km</b> verglichen.
+        Das Einsparpotenzial wird als <b>Spanne</b> ausgewiesen:
+        <b style="color:var(--text)">konservativ</b> = nur Frachtführer <i>oberhalb des Lane-Durchschnitts</i> werden auf den Durchschnitt gezogen;
+        <b style="color:var(--kpmg-pink)">aggressiv</b> = alle Frachtführer <i>oberhalb des günstigsten</i> werden auf den günstigsten gezogen.
+        Hohe €/km-Spreads sind Indikator für Bündelungs- und Neuverhandlungspotenzial — <b>kein Forecast</b>.
+        Klick auf eine Lane — in Karte, Diagrammen oder Tabelle — hebt sie in allen Visuals hervor; erneuter Klick setzt zurück.
+      </div>
+      <div id="ln-selbar"></div>
+      <div class="grid grid-2">
+        ${cardHTML("ln-map", 1, "Lane-Karte", "Routen der aktuellen Auswahl · Klick auf eine Linie hebt die Lane überall hervor")}
+        ${cardHTML("ln-save", 2, "Top-15 Lanes nach Einsparpotenzial-Spanne", "Balken = aggressiv (Best-Rate), heller Marker = konservativ (Schnitt-Routing)", true)}
+      </div>
+      <div class="grid" style="margin-top:18px">
+        ${cardHTML("ln-spread", 3, "€/km-Spread je Lane (Top-15 nach Einsparpotenzial)", "Pro Lane: Punkte = Frachtführer (Größe = Touren), Linie = Spread, gestrichelt = Ø €/km. Annotation rechts = Spanne konservativ (grau) / aggressiv (pink).")}
+      </div>
+      <div class="grid" style="margin-top:18px">
+        ${cardHTML("ln-fragtbl", 4, "Einsparpotenzial-Tabelle (Top-25)", "Lanes mit ≥2 Frachtführern · Spalten für konservative & aggressive Schätzung · Klick auf Zeile hebt Lane hervor")}
+      </div>
+      <div class="grid grid-2" style="margin-top:18px">
+        ${cardHTML("ln-cost",  5, "Top-15 Lanes nach Kosten",      "Größte Kostentreiber (alle Lanes)")}
+        ${cardHTML("ln-tours", 6, "Top-15 Lanes nach Tour-Anzahl", "Häufigste Strecken")}
+      </div>`;
+
+    // --- Lane map (linked with all other visuals) -------------------------
+    const savByLane = new Map(sav.map(L=>[L.lane, L]));
+    const mapCard = byId("ln-map");
+    const laneFC  = buildLaneFeatures(rows, savByLane);
+    teardownLaneMap();
+    if(!State.geojson){
+      noData(mapCard, "GeoJSON mit Routen laden („Daten hinzufügen“ oben rechts), um die Lanes auf der Karte zu sehen.");
+    } else if(!hasRole("shipment_id")){
+      noData(mapCard, "Tour-Nr. zuordnen, um Routen mit Touren zu verknüpfen.");
+    } else if(!laneFC.features.length){
+      noData(mapCard, "Keine Routen-Features matchen die aktuelle Auswahl (Tour-Nr. ↔ route_id).");
+    } else {
+      mapCard.innerHTML = `<div id="ln-map-host" class="map-host" style="height:520px"></div><div id="ln-map-legend" class="map-legend"></div>`;
+      mountLaneMap(byId("ln-map-host"), laneFC);
+      byId("ln-map-legend").innerHTML = [
+        {label:"Einsparpotenzial berechnet (≥2 Frachtführer)", color: cssVar("--kpmg-pink")||"#C6007E"},
+        {label:"mehrere Frachtführer", color: cssVar("--kpmg-light-blue")||"#0091DA"},
+        {label:"ein Frachtführer",     color: cssVar("--text-faint")||"#8DA0BC"},
+      ].map(it=>`<span class="lg"><span class="sw" style="background:${it.color}"></span>${escHtml(it.label)}</span>`).join("")
+      + `<span class="lg" style="color:var(--text-muted)">Linienbreite ∝ Σ Kosten</span>`;
+    }
+
+    // --- Charts + table, redrawable for the linked lane highlight ---------
+    const top15Sav = sav.slice(0, 15);
+    const top15    = ls.slice(0, 15);
+    const byTours  = ls.slice().sort((a,b)=>b.tours-a.tours).slice(0, 15);
+    let firstDraw  = true;
+
+    const drawCharts = ()=>{
+      if(!byId("ln-save")) return;  // view re-rendered / navigated away
+      const selBar = byId("ln-selbar");
+      if(selBar){
+        selBar.innerHTML = State.selLane
+          ? `<div class="filter-bar"><span class="filter-label">Hervorgehobene Lane:</span><span class="chip" id="lnSelChip">${escHtml(State.selLane)}<span class="chip-x">×</span></span></div>`
+          : "";
+        const chip = byId("lnSelChip");
+        if(chip) chip.onclick = ()=> selectLane(State.selLane);
+      }
+
+      // savings potential per lane + €/km spread
+      if(!hasRole("tour_km")){
+        noData(byId("ln-save"),   "Tour-KM zuordnen, um Best-Rate-Einsparpotenzial zu berechnen.");
+        noData(byId("ln-spread"), "Tour-KM zuordnen, um €/km-Spreads zu berechnen.");
+      } else if(!sav.length){
+        noData(byId("ln-save"),   "Keine Lane mit ≥2 Frachtführern (≥ 2 Touren je Frachtführer).");
+        noData(byId("ln-spread"), "Keine Lane mit ≥2 Frachtführern (≥ 2 Touren je Frachtführer).");
+      } else {
+        barH(byId("ln-save"), top15Sav.map(L=>({
+          key: L.lane, value: L.savingsUpper, color: cssVar("--kpmg-pink") || "#C6007E",
+          marker: L.savingsLower,
+          markerLabel: `<b>${escHtml(L.lane)}</b><br>konservative Einsparung: <b>${fmtCurrency(L.savingsLower)}</b> (${fmtPct(L.savingsPctLower)})`,
+          tip: `<b>${escHtml(L.lane)}</b><br>` +
+               `<span style="color:var(--text-muted)">konservativ:</span> <b>${fmtCurrency(L.savingsLower)}</b> (${fmtPct(L.savingsPctLower)})<br>` +
+               `<span style="color:var(--kpmg-pink)">aggressiv:</span> <b>${fmtCurrency(L.savingsUpper)}</b> (${fmtPct(L.savingsPctUpper)})<br>` +
+               `${L.nCarriers} Frachtführer · ${fmtNumber(L.tours)} Touren · ${fmtKm(Math.round(L.km))}<br>` +
+               `€/km: ${fmtCurrency2(L.bestRate)} (günstigster: ${escHtml(L.bestCarrier)}) — ${fmtCurrency2(L.worstRate)} (teuerster: ${escHtml(L.worstCarrier)})<br>` +
+               `Spread: <b>${fmtCurrency2(L.spread)}/km</b> · Ø ${fmtCurrency2(L.avgRate)}/km<br>` +
+               `<span class="tip-hint">Klick hebt die Lane überall hervor</span>`,
+        })), {fmt:fmtCurrency, abbr:fmtAbbrev, selectedKey:State.selLane, onClick:selectLane, animate:firstDraw});
+        laneSpread(byId("ln-spread"), top15Sav, {selectedKey:State.selLane, onClick:selectLane});
+      }
+
+      // detail table
+      if(!hasRole("tour_km")){
+        noData(byId("ln-fragtbl"), "Tour-KM zuordnen, um €/km vergleichen zu können.");
+      } else if(!sav.length){
+        noData(byId("ln-fragtbl"), "Keine fragmentierten Lanes mit ausreichender Stichprobe.");
+      } else {
+        table(byId("ln-fragtbl"), [
+          {label:"Lane",                              render:r=>escHtml(r.lane)},
+          {label:"# Frachtführer",                    num:true, render:r=>fmtNumber(r.nCarriers)},
+          {label:"# Touren",                          num:true, render:r=>fmtNumber(r.tours)},
+          {label:"Σ Tour-KM",                          num:true, render:r=>fmtKm(Math.round(r.km))},
+          {label:"Σ Kosten",                           num:true, render:r=>fmtCurrency(r.cost)},
+          {label:"Ø €/km",                             num:true, render:r=>fmtCurrency2(r.avgRate)},
+          {label:"min €/km",                           num:true, render:r=>fmtCurrency2(r.bestRate)},
+          {label:"max €/km",                           num:true, render:r=>fmtCurrency2(r.worstRate)},
+          {label:"Spread €/km",                        num:true, render:r=>fmtCurrency2(r.spread)},
+          {label:"Einsparung konservativ",            num:true, render:r=>fmtCurrency(r.savingsLower)},
+          {label:"% kons.",                           num:true, render:r=>fmtPct(r.savingsPctLower)},
+          {label:"Einsparung aggressiv",              num:true, render:r=>`<b>${fmtCurrency(r.savingsUpper)}</b>`},
+          {label:"% aggr.",                           num:true, render:r=>fmtPct(r.savingsPctUpper)},
+        ], sav.slice(0, 25), {empty:"Keine fragmentierten Lanes.",
+          rowKey:r=>r.lane, selectedKey:State.selLane, onRowClick:selectLane});
+      }
+
+      // top-lane context views
+      barH(byId("ln-cost"), top15.map(d=>({
+        key:d.key, value:d.price,
+        tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.price)} · ${fmtNumber(d.tours)} Touren · ${fmtWeight(d.weight)}<br>${d.carriers} Frachtführer<br><span class="tip-hint">Klick hebt die Lane überall hervor</span>`
+      })), {empty:"Quell- und Ziel-Ort zuordnen.", selectedKey:State.selLane, onClick:selectLane, animate:firstDraw});
+
+      barH(byId("ln-tours"), byTours.map(d=>({
+        key:d.key, value:d.tours,
+        tip:`<b>${escHtml(d.key)}</b><br>${fmtNumber(d.tours)} Touren · ${fmtCurrency(d.price)}<br>${d.carriers} Frachtführer<br><span class="tip-hint">Klick hebt die Lane überall hervor</span>`,
+        color: cssVar("--kpmg-medium-blue")
+      })), {fmt:fmtNumber, abbr:fmtNumber, selectedKey:State.selLane, onClick:selectLane, animate:firstDraw});
+
+      firstDraw = false;
+    };
+    _laneViewRedraw = drawCharts;
+    drawCharts();
+  }
+});
+
+/* =========================================================================
+   L. Map dashboard (MapLibre + CARTO basemaps)
+   ========================================================================= */
+let _map = null, _mapResizeObs = null, _mapPopup = null, _mapFitted = false;
+
+function currentBasemapUrl(){
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const v = State.mapView.basemap;
+  if(v==="positron") return "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+  if(v==="voyager")  return "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
+  if(v==="dark")     return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+  return isDark ? "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+                : "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+}
+
+/* Build the visualisation FeatureCollection by joining geojson features
+   onto the shipment rows via Tournummer ↔ feature.id / properties.route_id. */
+function buildMapFeatures(){
+  if(!State.geojson || !hasRole("shipment_id")) return {type:"FeatureCollection", features:[]};
+  const idByRow = new Map();   // id -> array of rows
+  for(const r of filteredRows()){
+    const id = String(val(r, "shipment_id") || "").trim();
+    if(!id) continue;
+    (idByRow.get(id) || idByRow.set(id, []).get(id)).push(r);
+  }
+  const feats = [];
+  for(const f of State.geojson.features){
+    const fid = String((f.properties && f.properties.route_id) || f.id || "").trim();
+    if(!fid) continue;
+    const rs = idByRow.get(fid);
+    if(!rs || !rs.length) continue;
+    const sumP = d3.sum(rs, price), sumW = d3.sum(rs, weight);
+    const carriers = Array.from(new Set(rs.map(r=>carrierKey(r))));
+    const ownerships = Array.from(new Set(rs.map(r=>ownershipKey(r))));
+    const temps = hasRole("temp_range") ? Array.from(new Set(rs.map(r=>val(r,"temp_range")||"(leer)"))) : [];
+    const lane = laneKey(rs[0]);
+    feats.push({
+      type:"Feature",
+      geometry:f.geometry,
+      properties:{
+        route_id: fid,
+        n_rows: rs.length,
+        weight: sumW,
+        price: sumP,
+        eurkg: sumW ? sumP/sumW : null,
+        carriers, carrier: carriers[0]||"(unbekannt)",
+        ownerships, ownership: ownerships[0]||"(unbekannt)",
+        temps, temp: temps[0]||"",
+        lane,
+        distance_m: (f.properties && f.properties.distance_m) || null,
+      }
+    });
+  }
+  return {type:"FeatureCollection", features:feats};
+}
+
+function categoryColorMap(values, palette){
+  palette = palette || KPMG_SCALE;
+  const m = new Map();
+  values.forEach((v,i)=>{ m.set(v, palette[i % palette.length]); });
+  return m;
+}
+
+function colorByMode(mode, features){
+  const ownColors = { Eigenlogistik: cssVar("--kpmg-blue")||"#00338D",
+                      Fremdlogistik: cssVar("--kpmg-pink")||"#C6007E" };
+  const tempColors = { Frisch: cssVar("--kpmg-green")||"#43B02A",
+                       Gefroren: cssVar("--kpmg-light-blue")||"#0091DA",
+                       Tiefkühl: cssVar("--kpmg-light-blue")||"#0091DA",
+                       Trocken: cssVar("--kpmg-orange")||"#FF8200" };
+  if(mode==="ownership"){
+    const fallback = cssVar("--kpmg-teal")||"#00A3A1";
+    return f => ownColors[f.properties.ownership] || (/eigen/i.test(f.properties.ownership)?ownColors.Eigenlogistik:(/fremd/i.test(f.properties.ownership)?ownColors.Fremdlogistik:fallback));
+  }
+  if(mode==="temp"){
+    const fallback = cssVar("--text-faint")||"#888";
+    return f => tempColors[f.properties.temp] || (/frisch/i.test(f.properties.temp)?tempColors.Frisch:(/gefr|tiefk/i.test(f.properties.temp)?tempColors.Gefroren:(/trocken/i.test(f.properties.temp)?tempColors.Trocken:fallback)));
+  }
+  if(mode==="eurkg"){
+    const ekgs = features.map(f=>f.properties.eurkg).filter(v=>v!=null && isFinite(v));
+    if(!ekgs.length) return ()=> cssVar("--text-faint")||"#888";
+    const sorted = ekgs.slice().sort((a,b)=>a-b);
+    const lo = d3.quantile(sorted, 0.05), hi = d3.quantile(sorted, 0.95);
+    const sc = d3.scaleSequential(d3.interpolateRdYlGn).domain([hi, lo]);
+    return f => f.properties.eurkg==null?(cssVar("--text-faint")||"#888"):sc(f.properties.eurkg);
+  }
+  // carrier (default): build a categorical map for the top-N carriers; others = grey
+  const top = aggregateBy(filteredRows(), r=>carrierKey(r), price, State.mapView.top).map(d=>d.key).filter(k=>k!=="(unbekannt)" && k!=="Sonstige");
+  const cmap = categoryColorMap(top);
+  const other = cssVar("--text-faint")||"#888";
+  return f => cmap.get(f.properties.carrier) || other;
+}
+
+function sizeByMode(mode, features){
+  if(mode==="weight"){
+    const ws = features.map(f=>f.properties.weight).filter(v=>v>0);
+    if(!ws.length) return ()=>2;
+    const sc = d3.scaleLinear().domain([0, d3.max(ws)]).range([1.4, 7.5]);
+    return f => sc(f.properties.weight||0);
+  }
+  if(mode==="price"){
+    const ps = features.map(f=>f.properties.price).filter(v=>v>0);
+    if(!ps.length) return ()=>2;
+    const sc = d3.scaleLinear().domain([0, d3.max(ps)]).range([1.4, 7.5]);
+    return f => sc(f.properties.price||0);
+  }
+  if(mode==="n_rows"){
+    const ns = features.map(f=>f.properties.n_rows).filter(v=>v>0);
+    if(!ns.length) return ()=>2;
+    const sc = d3.scaleLinear().domain([0, d3.max(ns)]).range([1.5, 8]);
+    return f => sc(f.properties.n_rows||0);
+  }
+  return ()=>3;
+}
+
+function mountMap(host){
+  // tear down a previously-mounted map
+  if(_map){ try{ _map.remove(); }catch(e){} _map = null; }
+  if(_mapResizeObs){ try{ _mapResizeObs.disconnect(); }catch(e){} _mapResizeObs = null; }
+  _mapFitted = false;
+  const fc = buildMapFeatures();
+  if(!fc.features.length){
+    noData(host, !State.geojson ? "Bitte GeoJSON mit Routen laden (rechts oben: Add files)." :
+      "Keine Routen-Features matchen die aktuelle Auswahl (Tour-Nr. ↔ route_id).");
+    return;
+  }
+  host.innerHTML = "";
+  const map = new maplibregl.Map({
+    container: host,
+    style: currentBasemapUrl(),
+    center: [9.5, 51.5], zoom: 5.4, attributionControl: true,
+    cooperativeGestures: false,
+  });
+  _map = map;
+  map.addControl(new maplibregl.NavigationControl({showCompass:false}), "top-right");
+  map.addControl(new maplibregl.ScaleControl({maxWidth:120, unit:"metric"}), "bottom-left");
+  map.addControl(new maplibregl.AttributionControl({customAttribution:"© KPMG — Logistics Analytics"}));
+
+  map.on("load", ()=> renderMapLayer(map, fc));
+  map.on("style.load", ()=> renderMapLayer(map, fc));
+
+  // keep map sized to its container (cards can resize/collapse)
+  _mapResizeObs = new ResizeObserver(()=>{ try{ map.resize(); }catch(e){} });
+  _mapResizeObs.observe(host);
+}
+
+function renderMapLayer(map, fc){
+  // colours/widths
+  const cFn = colorByMode(State.mapView.color, fc.features);
+  const wFn = sizeByMode(State.mapView.size,  fc.features);
+  fc.features.forEach(f=>{
+    f.properties._color = cFn(f);
+    f.properties._width = wFn(f);
+  });
+  // (re)create the source
+  if(map.getLayer("routes-hit")) map.removeLayer("routes-hit");
+  if(map.getLayer("routes-lines")) map.removeLayer("routes-lines");
+  if(map.getSource("routes")) map.removeSource("routes");
+  map.addSource("routes", {type:"geojson", data: fc, promoteId:"route_id"});
+  map.addLayer({
+    id:"routes-lines", type:"line", source:"routes",
+    paint:{
+      "line-color": ["coalesce", ["get","_color"], "#888"],
+      "line-width": ["coalesce", ["get","_width"], 2],
+      "line-opacity": 0.82,
+    },
+    layout:{ "line-cap":"round", "line-join":"round" }
+  });
+  // invisible wider hit-zone for popups
+  map.addLayer({
+    id:"routes-hit", type:"line", source:"routes",
+    paint:{ "line-color":"#000", "line-opacity":0, "line-width":["max", 14, ["+", 6, ["coalesce", ["get","_width"], 2]]] },
+  });
+  map.on("click","routes-hit",(e)=>{
+    const f = e.features && e.features[0]; if(!f) return;
+    const p = f.properties;
+    if(_mapPopup) try{ _mapPopup.remove(); }catch(_){}
+    const carriers = (p.carriers || (typeof p.carriers === "string" ? JSON.parse(p.carriers||"[]") : []));
+    const cars = Array.isArray(carriers) ? carriers : (typeof p.carriers==="string" ? safeParseList(p.carriers) : []);
+    const owns = Array.isArray(p.ownerships) ? p.ownerships : (typeof p.ownerships==="string" ? safeParseList(p.ownerships) : []);
+    const temps = Array.isArray(p.temps) ? p.temps : (typeof p.temps==="string" ? safeParseList(p.temps) : []);
+    _mapPopup = new maplibregl.Popup({offset:8, closeButton:true})
+      .setLngLat(e.lngLat)
+      .setHTML(
+        `<div style="font-weight:700;margin-bottom:4px">${escHtml(p.lane||p.route_id)}</div>` +
+        `<div>Tour: <b>${escHtml(p.route_id)}</b></div>` +
+        `<div>Distanz (ORS): <b>${p.distance_m?fmtKm(Math.round(p.distance_m/1000)):"—"}</b></div>` +
+        `<div>Frachtführer: <b>${escHtml(cars.join(", ")||p.carrier||"—")}</b></div>` +
+        `<div>Modus: <b>${escHtml(owns.join(", ")||p.ownership||"—")}</b></div>` +
+        (temps.length?`<div>Temperatur: <b>${escHtml(temps.join(", "))}</b></div>`:"") +
+        `<div style="margin-top:4px"><span class="tip-hint">Σ Kosten: <b>${fmtCurrency(+p.price||0)}</b> · Σ Gewicht: <b>${fmtWeight(+p.weight||0)}</b> · ${fmtNumber(+p.n_rows||0)} Touren</span></div>`
+      )
+      .addTo(map);
+  });
+  map.on("mouseenter","routes-hit",()=>{ map.getCanvas().style.cursor="pointer"; });
+  map.on("mouseleave","routes-hit",()=>{ map.getCanvas().style.cursor=""; });
+  // fit to features only on the first render — keep user pan/zoom on later updates
+  if(!_mapFitted){ fitMapTo(map, fc); _mapFitted = true; }
+}
+function safeParseList(s){ try{ const v=JSON.parse(s); return Array.isArray(v)?v:[]; }catch(_){ return []; } }
+
+function fitMapTo(map, fc){
+  let minX=180, minY=90, maxX=-180, maxY=-90, any=false;
+  for(const f of fc.features){
+    const geoms = f.geometry.type==="MultiLineString" ? f.geometry.coordinates : [f.geometry.coordinates];
+    for(const ls of geoms) for(const [x,y] of ls){
+      if(!isFinite(x)||!isFinite(y)) continue;
+      any = true;
+      if(x<minX) minX=x; if(y<minY) minY=y; if(x>maxX) maxX=x; if(y>maxY) maxY=y;
+    }
+  }
+  if(!any) return;
+  try{ map.fitBounds([[minX,minY],[maxX,maxY]], {padding:42, duration:600, maxZoom:11}); }catch(e){}
+}
+
+registerDashboard({
+  id:"map", title:"Routenkarte", group:"Karte",
+  subtitle:"Geokodierte Routen aus GeoJSON (CARTO + OpenStreetMap). Klick auf eine Linie zeigt Details.",
+  needs:["shipment_id"],
+  render(root){
+    const haveRoutes = !!State.geojson;
+    const haveShip  = !!State.rows.length;
+    const v = State.mapView;
+    const ts = (id, label, val, opts) => `
+      <div class="ctl"><label>${escHtml(label)}</label>
+        <select id="${id}">${opts.map(o=>`<option value="${o[0]}" ${o[0]===val?"selected":""}>${escHtml(o[1])}</option>`).join("")}</select>
+      </div>`;
+    root.innerHTML = `
+      <div class="card">
+        <div class="card-head"><div>
+          <h3 class="card-title">Routenkarte</h3>
+          <div class="card-sub">${haveRoutes?`Quelle: <b>${escHtml(State.geojsonSource||"GeoJSON")}</b> · ${fmtNumber(State.geojson.features.length)} Routen-Features`:"Keine GeoJSON-Datei geladen."}${haveShip?` · ${fmtNumber(filteredRows().length)} Touren in Auswahl`:""}</div>
+        </div></div>
+        <div class="map-controls">
+          ${ts("mv-color","Farbe nach", v.color, [["carrier","Frachtführer (Top-N)"],["ownership","Eigen vs. Fremd"],["temp","Temperaturbereich"],["eurkg","Effizienz (€/kg)"]])}
+          ${ts("mv-size","Linienbreite nach", v.size, [["weight","Gewicht (kg)"],["price","Kosten (€)"],["n_rows","Anzahl Touren"],["none","konstant"]])}
+          ${ts("mv-top","Top-N (Farbe Frachtführer)", String(v.top), [["3","Top-3"],["5","Top-5"],["8","Top-8"],["12","Top-12"],["20","Top-20"]])}
+          ${ts("mv-base","Basemap", v.basemap, [["auto","Auto (Theme)"],["positron","Positron (hell)"],["voyager","Voyager"],["dark","Dark Matter"]])}
+        </div>
+        <div id="map-host" class="map-host"></div>
+        <div id="map-legend" class="map-legend"></div>
+        <div id="map-stats" class="map-stats"></div>
+      </div>`;
+    byId("mv-color").onchange = e=>{ State.mapView.color = e.target.value; saveMapView(); refreshMap(); };
+    byId("mv-size").onchange  = e=>{ State.mapView.size  = e.target.value; saveMapView(); refreshMap(); };
+    byId("mv-top").onchange   = e=>{ State.mapView.top   = +e.target.value; saveMapView(); refreshMap(); };
+    byId("mv-base").onchange  = e=>{
+      State.mapView.basemap = e.target.value; saveMapView();
+      if(_map){ try{ _map.setStyle(currentBasemapUrl()); }catch(e){} }
+    };
+    mountMap(byId("map-host"));
+    renderMapLegendAndStats();
+  }
+});
+
+function refreshMap(){
+  if(!_map) return;
+  const fc = buildMapFeatures();
+  renderMapLayer(_map, fc);
+  renderMapLegendAndStats();
+}
+function renderMapLegendAndStats(){
+  const legendHost = byId("map-legend");
+  const statsHost  = byId("map-stats");
+  if(!legendHost || !statsHost) return;
+  const fc = buildMapFeatures();
+  const items = [];
+  if(State.mapView.color==="ownership"){
+    items.push({label:"Eigenlogistik", color:cssVar("--kpmg-blue")});
+    items.push({label:"Fremdlogistik", color:cssVar("--kpmg-pink")});
+  } else if(State.mapView.color==="temp"){
+    items.push({label:"Frisch",   color:cssVar("--kpmg-green")});
+    items.push({label:"Gefroren", color:cssVar("--kpmg-light-blue")});
+    items.push({label:"Trocken",  color:cssVar("--kpmg-orange")});
+  } else if(State.mapView.color==="eurkg"){
+    items.push({label:"günstig (€/kg)", color:"#1a9850"});
+    items.push({label:"teuer (€/kg)",   color:"#d73027"});
+  } else {
+    const top = aggregateBy(filteredRows(), r=>carrierKey(r), price, State.mapView.top)
+      .map(d=>d.key).filter(k=>k!=="(unbekannt)" && k!=="Sonstige");
+    top.forEach((k,i)=>items.push({label:k, color: kpmgColor(i)}));
+    items.push({label:"Sonstige", color: cssVar("--text-faint")});
+  }
+  legendHost.innerHTML = items.map(it=>`<span class="lg"><span class="sw" style="background:${it.color}"></span>${escHtml(it.label)}</span>`).join("");
+  const matched = fc.features.length;
+  const totalRows = filteredRows().length;
+  const sumP = d3.sum(fc.features, f=>+f.properties.price||0);
+  const sumW = d3.sum(fc.features, f=>+f.properties.weight||0);
+  statsHost.innerHTML = `<span><b>${fmtNumber(matched)}</b> Routen gezeichnet</span>` +
+                        `<span><b>${fmtNumber(totalRows)}</b> Touren in Auswahl</span>` +
+                        `<span>Σ Kosten gezeichnet: <b>${fmtCurrency(sumP)}</b></span>` +
+                        `<span>Σ Gewicht gezeichnet: <b>${fmtWeight(sumW)}</b></span>` +
+                        `<span>Quelle: <b>OpenStreetMap</b> · Basemap: <b>CARTO</b></span>`;
+}
+
+/* =========================================================================
+   L2. Lane-Karte (Lanes & Fragmentierung) — verlinkte Hervorhebung
+   ========================================================================= */
+let _laneMap = null, _laneMapObs = null, _laneMapPopup = null, _laneMapFC = null;
+let _laneViewRedraw = null;   // set by the lanes dashboard; redraws its charts in place
+
+function teardownLaneMap(){
+  if(_laneMapPopup){ try{ _laneMapPopup.remove(); }catch(e){} _laneMapPopup = null; }
+  if(_laneMap){ try{ _laneMap.remove(); }catch(e){} _laneMap = null; }
+  if(_laneMapObs){ try{ _laneMapObs.disconnect(); }catch(e){} _laneMapObs = null; }
+  _laneMapFC = null;
+}
+
+/* route_id -> geometry lookup over the loaded GeoJSON */
+function laneGeomIndex(){
+  const idx = new Map();
+  if(!State.geojson) return idx;
+  for(const f of State.geojson.features){
+    const fid = String((f.properties && f.properties.route_id) || f.id || "").trim();
+    if(fid && !idx.has(fid)) idx.set(fid, f.geometry);
+  }
+  return idx;
+}
+
+/* One feature per lane: representative route geometry + aggregated stats.
+   Colour: pink = savings potential computed, blue = fragmented, grey = single
+   carrier. Width scales with Σ cost. */
+function buildLaneFeatures(rows, savByLane){
+  if(!State.geojson || !hasRole("shipment_id")) return {type:"FeatureCollection", features:[]};
+  const geoms = laneGeomIndex();
+  const groups = d3.rollups(rows, vs=>vs, r=>laneKey(r));
+  const feats = [];
+  for(const [lane, vs] of groups){
+    if(!lane || lane.indexOf("?")>=0) continue;
+    let geom = null;
+    for(const r of vs){
+      const id = String(val(r,"shipment_id") || "").trim();
+      if(id && geoms.has(id)){ geom = geoms.get(id); break; }
+    }
+    if(!geom) continue;
+    const sav = savByLane ? savByLane.get(lane) : null;
+    feats.push({
+      type:"Feature", geometry:geom,
+      properties:{
+        lane,
+        tours: vs.length,
+        carriers: new Set(vs.map(r=>carrierKey(r)).filter(k=>k!=="(unbekannt)")).size,
+        price: d3.sum(vs, price),
+        weight: d3.sum(vs, weight),
+        savingsLower: sav ? sav.savingsLower : null,
+        savingsUpper: sav ? sav.savingsUpper : null,
+      }
+    });
+  }
+  const maxP = d3.max(feats, f=>f.properties.price) || 1;
+  const wSc  = d3.scaleSqrt().domain([0, maxP]).range([1.5, 7]);
+  const cSav  = cssVar("--kpmg-pink")       || "#C6007E";
+  const cFrag = cssVar("--kpmg-light-blue") || "#0091DA";
+  const cMono = cssVar("--text-faint")      || "#8DA0BC";
+  for(const f of feats){
+    const p = f.properties;
+    p._width = +wSc(p.price || 0).toFixed(2);
+    p._color = p.savingsUpper != null ? cSav : (p.carriers > 1 ? cFrag : cMono);
+  }
+  return {type:"FeatureCollection", features:feats};
+}
+
+function mountLaneMap(host, fc){
+  teardownLaneMap();
+  if(!fc.features.length){ noData(host, "Keine Routen-Features matchen die aktuelle Auswahl."); return; }
+  host.innerHTML = "";
+  const map = new maplibregl.Map({
+    container: host,
+    style: currentBasemapUrl(),
+    center: [9.5, 51.5], zoom: 5.4, attributionControl: true,
+    cooperativeGestures: false,
+  });
+  _laneMap = map; _laneMapFC = fc;
+  map.addControl(new maplibregl.NavigationControl({showCompass:false}), "top-right");
+  map.addControl(new maplibregl.ScaleControl({maxWidth:120, unit:"metric"}), "bottom-left");
+  let bound = false;
+  const draw = ()=>{
+    renderLaneMapLayer(map, fc);
+    if(!bound){ bindLaneMapEvents(map); bound = true; }
+  };
+  map.on("load", draw);
+  map.on("style.load", draw);
+  _laneMapObs = new ResizeObserver(()=>{ try{ map.resize(); }catch(e){} });
+  _laneMapObs.observe(host);
+  fitMapTo(map, fc);
+}
+
+function renderLaneMapLayer(map, fc){
+  if(map.getLayer("lanes-hit")) map.removeLayer("lanes-hit");
+  if(map.getLayer("lanes-lines")) map.removeLayer("lanes-lines");
+  if(map.getSource("lanes")) map.removeSource("lanes");
+  map.addSource("lanes", {type:"geojson", data: fc});
+  map.addLayer({
+    id:"lanes-lines", type:"line", source:"lanes",
+    paint:{
+      "line-color": ["coalesce", ["get","_color"], "#888"],
+      "line-width": ["coalesce", ["get","_width"], 2],
+      "line-opacity": 0.85,
+    },
+    layout:{ "line-cap":"round", "line-join":"round" }
+  });
+  map.addLayer({
+    id:"lanes-hit", type:"line", source:"lanes",
+    paint:{ "line-color":"#000", "line-opacity":0, "line-width":["max", 14, ["+", 6, ["coalesce", ["get","_width"], 2]]] },
+  });
+  updateLaneMapHighlight();
+}
+
+function bindLaneMapEvents(map){
+  map.on("click", "lanes-hit", (e)=>{
+    const f = e.features && e.features[0]; if(!f) return;
+    const p = f.properties;
+    if(_laneMapPopup) try{ _laneMapPopup.remove(); }catch(_){}
+    _laneMapPopup = new maplibregl.Popup({offset:8, closeButton:true})
+      .setLngLat(e.lngLat)
+      .setHTML(
+        `<div style="font-weight:700;margin-bottom:4px">${escHtml(p.lane)}</div>` +
+        `<div>${fmtNumber(+p.tours||0)} Touren · ${fmtNumber(+p.carriers||0)} Frachtführer</div>` +
+        `<div>Σ Kosten: <b>${fmtCurrency(+p.price||0)}</b> · Σ Gewicht: <b>${fmtWeight(+p.weight||0)}</b></div>` +
+        (p.savingsUpper!=null ? `<div>Einsparpotenzial: <b>${fmtCurrency(+p.savingsLower||0)} – ${fmtCurrency(+p.savingsUpper||0)}</b></div>` : "") +
+        `<div class="tip-hint">Klick schaltet die Hervorhebung um</div>`
+      )
+      .addTo(map);
+    selectLane(p.lane, {fromMap:true});
+  });
+  map.on("mouseenter", "lanes-hit", ()=>{ map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "lanes-hit", ()=>{ map.getCanvas().style.cursor = ""; });
+}
+
+function updateLaneMapHighlight(){
+  if(!_laneMap) return;
+  try{
+    if(!_laneMap.getLayer("lanes-lines")) return;
+    const sel = State.selLane;
+    const baseW = ["coalesce", ["get","_width"], 2];
+    if(sel == null){
+      _laneMap.setPaintProperty("lanes-lines", "line-opacity", 0.85);
+      _laneMap.setPaintProperty("lanes-lines", "line-width", baseW);
+    } else {
+      _laneMap.setPaintProperty("lanes-lines", "line-opacity",
+        ["case", ["==", ["get","lane"], sel], 1, 0.12]);
+      _laneMap.setPaintProperty("lanes-lines", "line-width",
+        ["case", ["==", ["get","lane"], sel], ["+", baseW, 2.5], baseW]);
+    }
+  }catch(e){}
+}
+
+function flyToLane(lane){
+  if(!_laneMap || !_laneMapFC) return;
+  const f = _laneMapFC.features.find(x=>x.properties.lane===lane);
+  if(f) fitMapTo(_laneMap, {features:[f]});
+}
+
+/* Toggle the highlighted lane and sync map + charts + table. */
+function selectLane(lane, opts){
+  opts = opts || {};
+  State.selLane = (State.selLane === lane) ? null : lane;
+  if(typeof _laneViewRedraw === "function") _laneViewRedraw();
+  updateLaneMapHighlight();
+  if(State.selLane != null && !opts.fromMap) flyToLane(State.selLane);
+}
+
+/* =========================================================================
+   M. 360° drill-throughs
+   ========================================================================= */
+function entityPicker(id, label, options, selected){
+  return `<div class="sel-360"><label>${escHtml(label)}</label>
+    <select id="${id}">${options.map(o=>`<option value="${escAttr(o.key)}" ${o.key===selected?"selected":""}>${escHtml(o.key)} — ${fmtAbbrev(o.value)}</option>`).join("")}</select></div>`;
+}
+
+registerDashboard({
+  id:"carrier360", title:"Frachtführer 360°", group:"Drilldown",
+  subtitle:"Tiefenanalyse eines einzelnen Frachtführers.",
+  needs:["price","carrier"],
+  render(root){
+    const base = baseRows();
+    const all = aggregateBy(base, r=>carrierKey(r), price).filter(d=>d.key!=="(unbekannt)" && d.key!=="Sonstige");
+    if(!all.length){ root.innerHTML = '<div class="placeholder-dash"><h3>Keine Frachtführer-Daten</h3></div>'; return; }
+    let sel = State.sel360c;
+    if(!all.some(d=>d.key===sel)) sel = null;
+    if(!sel && State.filters.carrier && all.some(d=>d.key===State.filters.carrier)) sel = State.filters.carrier;
+    if(!sel) sel = all[0].key;
+    State.sel360c = sel;
+    const rows = base.filter(r => carrierKey(r) === sel);
+    const sumP = d3.sum(rows, price), sumW = d3.sum(rows, weight), sumK = d3.sum(rows, tourKm);
+    const total = d3.sum(base, price);
+    const meta = all.find(d=>d.key===sel) || {value:sumP, share:0};
+
+    root.innerHTML = entityPicker("c360","Frachtführer", all.slice(0,400), sel) +
+      kpiStrip([
+        {label:"Σ Kosten", value: fmtCurrency(sumP), meta: `Rang #${meta.rank||"—"} · ${fmtPct(total?sumP/total:0)} gesamt`},
+        {label:"# Touren", value: fmtNumber(rows.length), meta:""},
+        {label:"Σ Gewicht", value: fmtWeight(sumW), meta:""},
+        {label:"Ø €/kg", value: sumW?fmtCurrency2(sumP/sumW):"—", meta:"Effizienz"},
+        {label:"Ø €/km", value: sumK?fmtCurrency2(sumP/sumK):"—", meta:"je Tour-Kilometer"},
+      ]) + `
+      <div class="grid">
+        ${cardHTML("c3-lane", null, "Top-Lanes dieses Frachtführers", "Strecken (Absender → Empfänger)")}
+      </div>
+      <div class="grid grid-2" style="margin-top:18px">
+        ${cardHTML("c3-temp", null, "Temperatur-Mix",     "Frisch / Gefroren / Trocken")}
+        ${cardHTML("c3-own",  null, "Logistik-Modus",     "Eigen- vs. Fremdlogistik")}
+      </div>`;
+    byId("c360").onchange = e=>{ State.sel360c = e.target.value; renderView(); };
+
+    const lanes = aggregateBy(rows, laneKey, price, 12).filter(d=>!d.key.includes("?"));
+    lanes.forEach(d=> d.tip = `<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.value)} · ${fmtPct(d.share||0)}`);
+    barH(byId("c3-lane"), lanes, {empty:"Quell- und Ziel-Orte zuordnen."});
+
+    donut(byId("c3-temp"), dimSeries(rows, "temp_range"), {empty:"Temperaturbereich zuordnen."});
+    donut(byId("c3-own"),  dimSeries(rows, "ownership"),  {empty:"Eigen- vs. Fremdlogistik zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"lane360", title:"Lane 360°", group:"Drilldown",
+  subtitle:"Tiefenanalyse einer einzelnen Lane (Absender → Empfänger).",
+  needs:["price"],
+  render(root){
+    const base = baseRows();
+    const all = aggregateBy(base, laneKey, price).filter(d=>d.key && !d.key.includes("?"));
+    if(!all.length){ root.innerHTML = '<div class="placeholder-dash"><h3>Keine Lane-Daten</h3></div>'; return; }
+    let sel = State.sel360l;
+    if(!all.some(d=>d.key===sel)) sel = null;
+    if(!sel) sel = all[0].key;
+    State.sel360l = sel;
+    const rows = base.filter(r => laneKey(r) === sel);
+    const sumP = d3.sum(rows, price), sumW = d3.sum(rows, weight), sumK = d3.sum(rows, tourKm);
+    const carriers = aggregateBy(rows, r=>carrierKey(r), price);
+
+    root.innerHTML = entityPicker("l360","Lane (Absender → Empfänger)", all.slice(0,400), sel) +
+      kpiStrip([
+        {label:"# Touren", value: fmtNumber(rows.length), meta:""},
+        {label:"Σ Kosten", value: fmtCurrency(sumP), meta:""},
+        {label:"Σ Gewicht", value: fmtWeight(sumW), meta:""},
+        {label:"# Frachtführer", value: fmtNumber(carriers.filter(d=>d.key!=="(unbekannt)").length), meta:"bedienen Lane"},
+        {label:"Ø €/kg", value: sumW?fmtCurrency2(sumP/sumW):"—", meta:"Effizienz"},
+      ]) + `
+      <div class="grid grid-2">
+        ${cardHTML("l3-carr", null, "Frachtführer auf dieser Lane",  "Aufteilung der Kosten")}
+        ${cardHTML("l3-own",  null, "Eigen vs. Fremd",                "Wer fährt diese Lane?")}
+      </div>
+      <div class="grid" style="margin-top:18px">
+        ${cardHTML("l3-temp", null, "Temperaturbereich",  "Frisch / Gefroren / Trocken")}
+      </div>`;
+    byId("l360").onchange = e=>{ State.sel360l = e.target.value; renderView(); };
+
+    barH(byId("l3-carr"), carriers.map(d=>({key:d.key, value:d.value, tip:`<b>${escHtml(d.key)}</b><br>${fmtCurrency(d.value)} · ${fmtPct(d.share||0)}`})), {empty:"Frachtführer zuordnen."});
+    donut(byId("l3-own"),  dimSeries(rows, "ownership"),  {empty:"Eigen- vs. Fremdlogistik zuordnen."});
+    donut(byId("l3-temp"), dimSeries(rows, "temp_range"), {empty:"Temperaturbereich zuordnen."});
+  }
+});
+
+/* =========================================================================
+   N. Stacked-bar helper used by ownership / temperature dashboards
+   ========================================================================= */
+function renderCrossBar(host, rows, groupRole, splitRole, colorFor, opts){
+  opts = opts || {};
+  if(!hasRole(groupRole) || !hasRole(splitRole)){ noData(host, opts.empty); return; }
+  const groups = d3.rollups(rows, vs=>vs, r=> val(r,groupRole)||"(leer)");
+  const items = groups.map(([key,vs])=>({key, total: d3.sum(vs, price), rows:vs}))
+    .filter(d=>d.key!=="(leer)")
+    .sort((a,b)=>b.total-a.total);
+  const data = opts.topN ? items.slice(0, opts.topN) : items.slice(0, 15);
+  if(!data.length){ noData(host, opts.empty); return; }
+  // build series per split value
+  const splitsSet = new Set();
+  for(const it of data){
+    const sub = d3.rollups(it.rows, vs=>d3.sum(vs, price), r=> val(r,splitRole)||"(leer)");
+    it.split = new Map(sub); for(const [k] of sub) splitsSet.add(k);
+  }
+  const splits = Array.from(splitsSet).filter(s=>s!=="(leer)");
+  // layout
+  const h = Math.max(170, data.length*26 + 38);
+  const {g,innerW,innerH} = makeSvg(host, h, {top:8,right:26,bottom:30,left:opts.left||190});
+  const x = d3.scaleLinear().domain([0, d3.max(data, d=>d.total) || 1]).nice().range([0, innerW]);
+  const y = d3.scaleBand().domain(data.map(d=>d.key)).range([0, innerH]).padding(.22);
+  g.append("g").attr("class","gridline").call(d3.axisBottom(x).ticks(5).tickSize(innerH).tickFormat(""));
+  const row = g.selectAll(".row").data(data).join("g").attr("class","row")
+    .attr("transform", d=>`translate(0,${y(d.key)})`);
+  row.each(function(d){
+    let cum = 0;
+    const sel = d3.select(this);
+    splits.forEach(s=>{
+      const v = d.split.get(s) || 0; if(!v) return;
+      const w = x(v);
+      sel.append("rect").attr("x", x(cum)).attr("y", 0).attr("height", y.bandwidth()).attr("width", w).attr("rx", 3)
+        .attr("fill", colorFor(s))
+        .on("mousemove", (e)=> showTip(`<b>${escHtml(d.key)}</b><br>${escHtml(s)}: ${fmtCurrency(v)} · ${fmtPct(d.total?v/d.total:0)}<br><span class="tip-hint">Klick zum Filtern (${splitRole})</span>`, e))
+        .on("mouseleave", hideTip)
+        .style("cursor","pointer")
+        .on("click", ()=>{ if(clickGuard(s)) applyFilter(splitRole, s); });
+      cum += v;
+    });
+  });
+  const ya = g.append("g").attr("class","axis").call(d3.axisLeft(y).tickSize(0));
+  ya.select(".domain").remove();
+  ya.selectAll("text").each(function(){
+    const t=d3.select(this); const s=t.text(); if(s.length>28){ t.text(s.slice(0,27)+"…"); t.append("title").text(s); }
+  });
+  g.append("g").attr("class","axis").attr("transform",`translate(0,${innerH})`).call(d3.axisBottom(x).ticks(5).tickFormat(fmtAbbrev));
+  legend(host, splits.map(s=>({label:s, color:colorFor(s)})));
+}
+function fmtNumber2(v){ if(v==null||isNaN(v)) return "—"; return _nfNum2.format(v); }
+
+/* =========================================================================
+   O. Sample data — embedded shipments + routes (a few cities in NRW)
+   ========================================================================= */
+const SAMPLE_LOCATIONS = [
+  {key:"Coesfeld",       pc:"48653", country:"DE", lon:7.16667, lat:51.95},
+  {key:"Münster",        pc:"48143", country:"DE", lon:7.6261,  lat:51.9607},
+  {key:"Dortmund",       pc:"44137", country:"DE", lon:7.4653,  lat:51.5136},
+  {key:"Köln",           pc:"50667", country:"DE", lon:6.9603,  lat:50.9375},
+  {key:"Düsseldorf",     pc:"40213", country:"DE", lon:6.7763,  lat:51.2277},
+  {key:"Essen",          pc:"45127", country:"DE", lon:7.0116,  lat:51.4556},
+  {key:"Duisburg",       pc:"47051", country:"DE", lon:6.7623,  lat:51.4344},
+  {key:"Bochum",         pc:"44787", country:"DE", lon:7.2162,  lat:51.4818},
+  {key:"Wuppertal",      pc:"42103", country:"DE", lon:7.1500,  lat:51.2562},
+  {key:"Bielefeld",      pc:"33602", country:"DE", lon:8.5325,  lat:52.0302},
+  {key:"Oer-Erkenschwick", pc:"45739", country:"DE", lon:7.2545, lat:51.6360},
+  {key:"Gronau",         pc:"48599", country:"DE", lon:7.0290,  lat:52.2107},
+  {key:"Borken",         pc:"46325", country:"DE", lon:6.8580,  lat:51.8439},
+  {key:"Bocholt",        pc:"46395", country:"DE", lon:6.6160,  lat:51.8392},
+  {key:"Recklinghausen", pc:"45657", country:"DE", lon:7.1973,  lat:51.6126},
+];
+const SAMPLE_CARRIERS = [
+  "Müller Spedition GmbH","Schenker Logistik","DACHSER SE","Rhenus Group","Hellmann Worldwide",
+  "Kühne + Nagel","Schmidt Transport KG","Wagner Logistik","Becker Frischdienst",
+  "Eigene Flotte","Eigene Flotte Nord","Eigene Flotte Süd","Tönsmeier Transport","Westlog GmbH",
+];
+const SAMPLE_AREAS = [
+  {h:"VK", n:"Verkauf Lebensmittel"},
+  {h:"DC", n:"Distributionszentrum"},
+  {h:"FZ", n:"Frischezentrum"},
+  {h:"TK", n:"Tiefkühl-Logistik"},
+  {h:"WH", n:"Wareneingang Handel"},
+];
+const SAMPLE_TRAFFIC = ["Nahverkehr","Fernverkehr","Regional","Werksverkehr","Linienverkehr"];
+const SAMPLE_AUFART  = ["Normal","Express","Sonderfahrt","Retoure","Leerfahrt"];
+const SAMPLE_KINDS   = ["Stückgut","Container","Wechselbrücke","Komplettladung","Teilladung"];
+const SAMPLE_TEMPS   = ["Frisch","Gefroren","Trocken"];
+
+function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+function pickWeighted(a, p){ return a[Math.floor(Math.pow(Math.random(),p||1.6)*a.length)]; }
+function rnd(a,b){ return a + Math.random()*(b-a); }
+
+/* synthesise a LineString roughly between two points with mild zig-zag noise */
+function syntheticPolyline(start, end, steps){
+  steps = steps || 25;
+  const out = [];
+  for(let i=0;i<=steps;i++){
+    const t = i/steps;
+    const x = start.lon + (end.lon-start.lon)*t + (Math.sin(t*Math.PI*3)*0.05);
+    const y = start.lat + (end.lat-start.lat)*t + (Math.cos(t*Math.PI*3)*0.04);
+    out.push([+x.toFixed(5), +y.toFixed(5)]);
+  }
+  return out;
+}
+function haversineKm(a, b){
+  const R=6371, toRad=v=>v*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLon=toRad(b.lon-a.lon);
+  const s=Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+function generateSample(){
+  // Build ~24 unique lanes; reuse routes across many shipments.
+  const lanes = [];
+  const seen = new Set();
+  while(lanes.length<24){
+    const a = pick(SAMPLE_LOCATIONS), b = pick(SAMPLE_LOCATIONS);
+    if(a.key===b.key) continue;
+    const k = a.key+"→"+b.key;
+    if(seen.has(k)) continue; seen.add(k);
+    lanes.push({start:a, end:b, line: syntheticPolyline(a,b), km: Math.round(haversineKm(a,b)*1.25)});
+  }
+  // Assign 1-3 "preferred carriers" per lane (some lanes intentionally fragmented).
+  lanes.forEach((L,i)=>{
+    const k = (i%5===0) ? 4 : (i%3===0 ? 3 : (i%2===0 ? 2 : 1));
+    L.carriers = []; const used=new Set();
+    while(L.carriers.length<k){
+      const c = pick(SAMPLE_CARRIERS); if(used.has(c)) continue; used.add(c); L.carriers.push(c);
+    }
+  });
+  // generate shipment rows
+  const rows = [];
+  const features = [];
+  let nextId = 15850000;
+  lanes.forEach((L,laneIdx)=>{
+    const nTours = 8 + Math.floor(Math.random()*30); // 8–37 tours per lane
+    // route geojson feature (one per lane, shared by all tours on the lane)
+    // For visualisation we need EACH Tournummer to map to a feature, so we
+    // create one feature per Tournummer reusing the same geometry — that's
+    // the same join model as the production ors-routing output.
+    for(let i=0;i<nTours;i++){
+      const id = String(nextId++);
+      const carrier = pickWeighted(L.carriers, 1.0);
+      const own = /eigen/i.test(carrier) ? "Eigenlogistik" : "Fremdlogistik";
+      const area = pick(SAMPLE_AREAS);
+      const temp = pickWeighted(SAMPLE_TEMPS, 1.3);
+      // price model: per-km + per-kg + carrier bias + temperature surcharge
+      const w = Math.round(rnd(150, 18000));
+      const tempMult = temp==="Gefroren" ? 1.35 : (temp==="Frisch" ? 1.15 : 1.0);
+      const carrierMult = 0.9 + (SAMPLE_CARRIERS.indexOf(carrier)%6)*0.05;
+      const basePerKm = own==="Eigenlogistik" ? 0.85 : 1.05;
+      const baseFee   = own==="Eigenlogistik" ? 35 : 55;
+      const px = Math.round((baseFee + basePerKm*L.km + w*0.011) * tempMult * carrierMult * 100) / 100;
+      // date over last 90 days
+      const day = new Date(); day.setDate(day.getDate() - Math.floor(Math.random()*90));
+      rows.push({
+        "Tournummer": id,
+        "TourDatum": day,
+        "Tourstatus": "abgerechnet",
+        "Re": 1, "TS": 1,
+        "Hauptbereich": area.h,
+        "Bereich Name": area.n,
+        "Bereichsart": "Standard",
+        "Verkehrsart": "VA"+(SAMPLE_TRAFFIC.indexOf(pick(SAMPLE_TRAFFIC))+1),
+        "Verkehrsart Name": pick(SAMPLE_TRAFFIC),
+        "AufArt": pickWeighted(SAMPLE_AUFART, 2.2),
+        "Temperaturbereich": temp,
+        "Stückgut / Container Sped.": pick(SAMPLE_KINDS),
+        "Frachtführer": "F"+String(100+SAMPLE_CARRIERS.indexOf(carrier)),
+        "Frachtführername": carrier,
+        "Eigen- vs. Fremdlogistik": own,
+        "TourKM": L.km,
+        "tats. Gewicht": w,
+        "#Sp": Math.ceil(w/700),
+        "Preis": px,
+        "Absender": "A"+(laneIdx+1),
+        "Absendername": L.start.key+" Standort",
+        "A-PLZ": L.start.pc, "A-Ort": L.start.key, "A-LKZ": L.start.country,
+        "Empfänger": "E"+(laneIdx+1),
+        "Empfängername": L.end.key+" Standort",
+        "E-PLZ": L.end.pc, "E-Ort": L.end.key, "E-LKZ": L.end.country,
+        "__source":"beispiel-touren.xlsx"
+      });
+      features.push({
+        type:"Feature", id:id,
+        geometry:{type:"LineString", coordinates: L.line},
+        properties:{
+          route_id: id, profile:"driving-hgv",
+          start:[L.start.lon, L.start.lat], end:[L.end.lon, L.end.lat],
+          distance_m: Math.round(L.km*1000), duration_s: Math.round(L.km*60),
+        }
+      });
+    }
+  });
+  return {rows, geojson:{type:"FeatureCollection", features}};
+}
+
+function loadSample(){
+  const s = generateSample();
+  State.rows = s.rows; State.sources = ["beispiel-touren.xlsx"];
+  State.geojson = s.geojson; State.geojsonSource = "beispiel-routen.geojson";
+  State.isSample = true; State.errors = [];
+  detectColumns(); autoMap(); saveMapping(State.mapping);
+  refreshShell();
+  navigate("overview");
+}
+
+/* =========================================================================
+   P. Router / shell rendering
+   ========================================================================= */
+const nav        = document.getElementById("nav");
+const content    = document.getElementById("content");
+const topActions = document.getElementById("topActions");
+const byId       = id => document.getElementById(id);
+
+function refreshShell(){
+  const GROUP_ORDER = ["Diagnose","Effizienz","Karte","Drilldown"];
+  const groups = {};
+  dashboards.forEach(d=>{ (groups[d.group||"General"] = groups[d.group||"General"] || []).push(d); });
+  const ordered = Object.keys(groups).sort((a,b)=>{
+    const ia=GROUP_ORDER.indexOf(a), ib=GROUP_ORDER.indexOf(b);
+    return (ia<0?99:ia)-(ib<0?99:ib);
+  });
+  nav.innerHTML = ordered.map(grp=>`
+    <div class="nav-group-label">${escHtml(grp)}</div>
+    ${groups[grp].map(d=>{
+      const ok = dashboardReady(d);
+      return `<a class="nav-item ${ok?"":"disabled"} ${State.activeView===d.id?"active":""}"
+        data-view="${d.id}" title="${ok?"":"Benötigt: "+(d.needs||[]).join(", ")}">
+        <span class="nav-dot"></span>${escHtml(d.title)}</a>`;
+    }).join("")}
+  `).join("");
+  nav.querySelectorAll(".nav-item[data-view]").forEach(el=>{
+    if(!el.classList.contains("disabled")) el.onclick = ()=> navigate(el.dataset.view);
+  });
+  // data status
+  const ds = document.getElementById("dataStatus");
+  if(State.rows.length || State.geojson){
+    let html = "";
+    if(State.rows.length) html += `<b>${fmtNumber(State.rows.length)}</b> Touren · <b>${State.sources.length||1}</b> Datei(en)`;
+    if(State.geojson)     html += `${html?"<br>":""}<b>${fmtNumber(State.geojson.features.length)}</b> Routen-Features${State.geojsonSource?` · ${escHtml(State.geojsonSource)}`:""}`;
+    if(State.isSample)    html += '<br><span style="color:var(--kpmg-light-blue)">Beispieldaten</span>';
+    ds.innerHTML = html;
+  } else ds.textContent = "Keine Daten geladen.";
+  // top actions
+  if(State.rows.length || State.geojson){
+    topActions.innerHTML = `
+      <button class="btn btn-ghost" id="actRemap">Mapping bearbeiten</button>
+      <button class="btn" id="actAdd">Daten hinzufügen</button>`;
+    const r = topActions.querySelector("#actRemap");
+    if(r){ r.onclick = ()=> openMappingModal(false); if(!State.rows.length) r.disabled = true; }
+    topActions.querySelector("#actAdd").onclick = ()=> document.getElementById("fileInput").click();
+  } else topActions.innerHTML = "";
+}
+
+function navigate(viewId){
+  const d = dashboards.find(x=>x.id===viewId);
+  if(!d){ renderEmpty(); return; }
+  if(!dashboardReady(d)){
+    const f = dashboards.find(dashboardReady);
+    if(f) navigate(f.id); else renderEmpty();
+    return;
+  }
+  State.activeView = viewId;
+  location.hash = "#/" + viewId;
+  // tear down the map if leaving the map view
+  if(viewId!=="map" && _map){ try{ _map.remove(); }catch(e){} _map=null; }
+  // tear down the lane mini-map if leaving the lanes view
+  if(viewId!=="lanes"){ teardownLaneMap(); _laneViewRedraw = null; }
+  refreshShell();
+  renderView();
+}
+function renderView(){
+  if((!State.rows.length && !State.geojson) || !State.activeView){ renderEmpty(); return; }
+  const d = dashboards.find(x=>x.id===State.activeView);
+  if(!d || !dashboardReady(d)){ renderEmpty(); return; }
+  document.getElementById("viewTitle").textContent = d.title;
+  document.getElementById("viewSubtitle").textContent = d.subtitle || "";
+  content.innerHTML = `<div id="aufartBar"></div><div id="filterBar" class="filter-bar"></div><div id="dashRoot"></div>`;
+  renderAufartBar();
+  renderFilterBar();
+  d.render(document.getElementById("dashRoot"), {});
+}
+function renderActiveDashboard(){ renderView(); }
+
+/* Global AufArt include/exclude — one toggle chip per value, applied via
+   baseRows() to every dashboard. Survives tab changes (session only). */
+function toggleAufart(v){
+  if(State.aufartOff.has(v)) State.aufartOff.delete(v); else State.aufartOff.add(v);
+  renderView();
+}
+function renderAufartBar(){
+  const bar = byId("aufartBar"); if(!bar) return;
+  if(!hasRole("auf_art") || !State.rows.length){ bar.className=""; bar.innerHTML=""; return; }
+  bar.className = "filter-bar"; bar.style.marginBottom = "6px";
+  // counts over ALL rows (unfiltered) so the chips stay stable while toggling
+  const counts = d3.rollups(State.rows, v=>v.length, aufartKeyOf)
+    .sort((a,b)=>b[1]-a[1]);
+  const chips = counts.map(([k,n])=>{
+    const off = State.aufartOff.has(k);
+    return `<span class="chip aufart-chip ${off?"off":""}" data-av="${escAttr(k)}"
+      title="${off?"ausgeblendet — Klick blendet wieder ein":"Klick blendet diese Auftragsart überall aus"}">
+      <span class="dot"></span>${escHtml(k)} <small>(${fmtNumber(n)})</small></span>`;
+  }).join("");
+  const reset = State.aufartOff.size
+    ? `<button class="btn btn-ghost btn-sm" id="aufartReset">alle einblenden</button>` : "";
+  bar.innerHTML = `<span class="filter-label">Auftragsart:</span>${chips}${reset}`;
+  bar.querySelectorAll(".aufart-chip").forEach(c=>{ c.onclick = ()=> toggleAufart(c.dataset.av); });
+  const r = byId("aufartReset");
+  if(r) r.onclick = ()=>{ State.aufartOff.clear(); renderView(); };
+}
+
+function renderFilterBar(){
+  const bar = document.getElementById("filterBar"); if(!bar) return;
+  const keys = Object.keys(State.filters);
+  if(!keys.length){
+    bar.innerHTML = `<span class="filter-hint">Tipp: Balken, Segmente und Stack-Bereiche anklicken filtert den gesamten Cube.</span>`;
+    return;
+  }
+  const chips = keys.map(role=>`<span class="chip" data-role="${escAttr(role)}">${escHtml(filterLabel(role, State.filters[role]))}<span class="chip-x">×</span></span>`).join("");
+  let links = "";
+  if(State.filters.carrier!=null) links += `<button class="btn btn-ghost btn-sm" data-go="carrier360">→ Frachtführer 360°</button>`;
+  bar.innerHTML = `<span class="filter-label">Aktive Filter:</span>${chips}<button class="btn btn-ghost btn-sm" id="clearF">Alle zurücksetzen</button>${links}`;
+  bar.querySelectorAll(".chip").forEach(c => c.onclick = ()=> applyFilter(c.dataset.role, State.filters[c.dataset.role]));
+  document.getElementById("clearF").onclick = clearFilters;
+  bar.querySelectorAll("[data-go]").forEach(b => b.onclick = ()=> navigate(b.dataset.go));
+}
+
+function renderEmpty(){
+  State.activeView = null;
+  document.getElementById("viewTitle").textContent = "Übersicht";
+  document.getElementById("viewSubtitle").textContent = "Daten laden, um zu starten.";
+  const errs = State.errors.length
+    ? `<div class="errors">${State.errors.map(e=>`<div class="error-row">${escHtml(e)}</div>`).join("")}</div>`
+    : "";
+  content.innerHTML = `
+    <div class="empty-wrap">
+      <h2>Logistik-Daten laden</h2>
+      <p>Ziehen Sie eine oder mehrere Dateien hier hinein, um Ihre Logistik-Effizienz zu analysieren.
+         Alle Berechnungen laufen <b>lokal im Browser</b> — es werden keine Daten hochgeladen.</p>
+      <ul style="text-align:left;display:inline-block;color:var(--text-muted);font-size:13px;margin:0 auto 22px;padding-left:18px">
+        <li><b>.xlsx</b> — Tour-/Sendungsdaten (eine Zeile pro Tour)</li>
+        <li><b>.geojson</b> — Routen-Linien (z.B. Output des <i>ors-routing</i> Tools)</li>
+      </ul>
+      <div class="dropzone" id="dropzone">
+        <div class="dz-icon">⬆</div>
+        <div class="dz-main">Dateien hier ablegen</div>
+        <div class="dz-sub">oder klicken zum Auswählen · .xlsx und .geojson werden kombiniert</div>
+      </div>
+      <div class="empty-actions">
+        <button class="btn btn-primary" id="emBrowse">Dateien auswählen</button>
+        <button class="btn" id="emSample">Beispieldaten laden</button>
+      </div>
+      <div class="note">CARTO-Basemap-Kacheln benötigen Internetzugang. CDN-Bibliotheken: D3 (ISC), SheetJS (Apache-2.0), MapLibre GL JS (BSD-3-Clause).</div>
+      ${errs}
+    </div>`;
+  const dz = document.getElementById("dropzone");
+  dz.onclick = ()=> document.getElementById("fileInput").click();
+  document.getElementById("emBrowse").onclick = ()=> document.getElementById("fileInput").click();
+  document.getElementById("emSample").onclick = loadSample;
+}
+
+/* =========================================================================
+   Q. Init
+   ========================================================================= */
+function init(){
+  // theme
+  const t = loadTheme() || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  setTheme(t);
+  document.querySelectorAll("#themeToggle button").forEach(b=>{ b.onclick = ()=> setTheme(b.dataset.themeSet); });
+  // mapping & map-view from storage (mapping applied after columns detected on load)
+  State.mapping = loadMapping();
+  State.mapView = loadMapView();
+  // file input
+  document.getElementById("fileInput").addEventListener("change", e=>{
+    ingestFiles(e.target.files); e.target.value = "";
+  });
+  // global drag & drop
+  ["dragenter","dragover"].forEach(ev => document.addEventListener(ev, e=>{
+    e.preventDefault(); const dz = document.getElementById("dropzone"); if(dz) dz.classList.add("drag");
+  }));
+  ["dragleave","drop"].forEach(ev => document.addEventListener(ev, e=>{
+    e.preventDefault(); const dz = document.getElementById("dropzone"); if(dz && ev!=="drop") dz.classList.remove("drag");
+  }));
+  document.addEventListener("drop", e=>{
+    if(e.dataTransfer && e.dataTransfer.files.length) ingestFiles(e.dataTransfer.files);
+  });
+  // responsive re-render
+  let rt; window.addEventListener("resize", ()=>{ clearTimeout(rt); rt = setTimeout(renderActiveDashboard, 180); });
+
+  refreshShell();
+  renderEmpty();
+}
+init();
+</script>
+</body>
+</html>
