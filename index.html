@@ -870,22 +870,24 @@ function plantAvgDocValue(rows){
       tip:`<b>${escHtml(key)}</b><br>Ø ${fmtCurrency(o.avg)} / Beleg<br>${fmtNumber(o.docs)} Belege · ${fmtCurrency(o.total)} gesamt<br><span class="tip-hint">Klick zum Filtern</span>`}))
     .filter(d=>d.key!=="(leer)").sort((a,b)=>b.value-a.value);
 }
-/* #22 — Werksbezogene Ø Bestellwerte je Lieferant: je Werk Ø des belegbezogenen
-   Durchschnittswerts je Lieferant (jeder Lieferant gleich gewichtet) */
-function plantAvgDocValuePerSupplier(rows){
+/* #22 — Werksbezogene Bestellwerte je Lieferant: Gesamt-Spend je Werk ÷ Anzahl
+   Lieferanten an diesem Werk */
+function plantSpendPerSupplier(rows){
   rows=rows||filteredRows();
-  if(!hasRole("plant")||!hasRole("document_no")||!hasRole("supplier")) return [];
+  if(!hasRole("plant")||!hasRole("supplier")) return [];
   const byPlant=d3.rollups(rows, v=>{
-    const bySup=d3.rollups(v, vv=>{
-      const docs=d3.rollups(vv, x=>d3.sum(x,amt), r=>val(r,"document_no")||"(leer)");
-      const t=d3.sum(docs,d=>d[1]);
-      return docs.length?t/docs.length:0;
-    }, r=>val(r,"supplier")||"(leer)");
-    return {avg:bySup.length?d3.sum(bySup,d=>d[1])/bySup.length:0, suppliers:bySup.length};
+    const total=d3.sum(v,amt);
+    const suppliers=new Set(v.map(r=>val(r,"supplier")).filter(Boolean)).size;
+    return {value:suppliers?total/suppliers:0, suppliers, total};
   }, r=>{const k=val(r,"plant");return (k==null||k==="")?"(leer)":k;});
-  return byPlant.map(([key,o])=>({key, value:o.avg,
-      tip:`<b>${escHtml(key)}</b><br>Ø ${fmtCurrency(o.avg)} / Beleg je Lieferant<br>${fmtNumber(o.suppliers)} Lieferanten<br><span class="tip-hint">Klick zum Filtern</span>`}))
+  return byPlant.map(([key,o])=>({key, value:o.value,
+      tip:`<b>${escHtml(key)}</b><br>${fmtCurrency(o.value)} / Lieferant<br>${fmtNumber(o.suppliers)} Lieferanten · ${fmtCurrency(o.total)} gesamt<br><span class="tip-hint">Klick zum Filtern</span>`}))
     .filter(d=>d.key!=="(leer)").sort((a,b)=>b.value-a.value);
+}
+/* stable, dataset-wide colour per Werk so both Werke-charts agree */
+function plantColorMap(){
+  const keys=[...new Set(State.rows.map(r=>val(r,"plant")).filter(k=>k!=null&&k!==""))].sort(d3.ascending);
+  const m={}; keys.forEach((k,i)=>{ m[k]=kpmgColor(i); }); return m;
 }
 
 /* ---------- KPI / card scaffolding ---------- */
@@ -1173,15 +1175,31 @@ registerDashboard({
     const plantCount=distinct(rows,"plant");
     const avgDoc=plantAvgDocValue(rows);
     const grandAvg=avgDoc.length?d3.mean(avgDoc,d=>d.value):0;
-    root.innerHTML=kpiStrip([
+    // Warengruppe filter (feeds the shared cross-filter cube, so chips stay in sync)
+    const curCat=State.filters.category!=null?String(State.filters.category):"";
+    const cats=hasRole("category")
+      ? dimStats(filteredRowsExcept("category"),"category").items.filter(d=>d.key!=="(leer)"&&!d.isOther)
+      : [];
+    const catPicker=hasRole("category")?`<div class="sel-360">
+      <label>Warengruppe</label>
+      <select id="pl-cat">
+        <option value="">— Alle Warengruppen —</option>
+        ${cats.map(c=>`<option value="${escAttr(c.key)}" ${String(c.key)===curCat?"selected":""}>${escHtml(c.key)} — ${fmtAbbrev(c.value)}</option>`).join("")}
+      </select></div>`:"";
+    root.innerHTML=catPicker+kpiStrip([
       {label:"Werke", value:plantCount!=null?fmtNumber(plantCount):"—", meta:"eindeutig"},
       {label:"Ø Belegwert (#21)", value:avgDoc.length?fmtCurrency(grandAvg):"—", meta:"Mittel über Werke"},
       {label:"Höchster Ø Belegwert", value:avgDoc.length?avgDoc[0].key:"—", meta:avgDoc.length?fmtCurrency(avgDoc[0].value):"—"},
     ])+`
-      <div class="grid">${cardHTML("pl-doc",21,"Werksbezogene Bestellwerte","Ø Rechnungsbetrag je Einkaufsbeleg — eine Säule je Werk · Klick filtert")}</div>
-      <div class="grid" style="margin-top:20px">${cardHTML("pl-sup",22,"Werksbezogene Ø Bestellwerte je Lieferant","Ø Rechnungsbetrag je Einkaufsbeleg je Lieferant — eine Säule je Werk · Klick filtert")}</div>`;
-    barV(byId("pl-doc"), plantAvgDocValue(filteredRowsExcept("plant")), {filterRole:"plant", bottom:96, empty:"Spalte „Werk“ + „Einkaufsbeleg“ zuordnen."});
-    barV(byId("pl-sup"), plantAvgDocValuePerSupplier(filteredRowsExcept("plant")), {filterRole:"plant", bottom:96, empty:"Spalte „Werk“, „Einkaufsbeleg“ + „Lieferant“ zuordnen."});
+      <div class="grid">${cardHTML("pl-doc",21,"Werksbezogene Bestellwerte","Ø Rechnungsbetrag je Einkaufsbeleg (Gesamt-Spend ÷ Belege) — eine Säule je Werk · Klick filtert")}</div>
+      <div class="grid" style="margin-top:20px">${cardHTML("pl-sup",22,"Werksbezogene Bestellwerte je Lieferant","Gesamt-Spend ÷ Anzahl Lieferanten je Werk — eine Säule je Werk · Klick filtert")}</div>`;
+    const cs=byId("pl-cat");
+    if(cs) cs.onchange=e=>{ if(e.target.value) State.filters.category=e.target.value; else delete State.filters.category; renderView(); };
+    // consistent colour per Werk across both charts
+    const cmap=plantColorMap();
+    const colorize=arr=>{ arr.forEach(d=>{ d.color=cmap[d.key]; }); return arr; };
+    barV(byId("pl-doc"), colorize(plantAvgDocValue(filteredRowsExcept("plant"))), {filterRole:"plant", bottom:96, empty:"Spalte „Werk“ + „Einkaufsbeleg“ zuordnen."});
+    barV(byId("pl-sup"), colorize(plantSpendPerSupplier(filteredRowsExcept("plant"))), {filterRole:"plant", bottom:96, empty:"Spalte „Werk“ + „Lieferant“ zuordnen."});
   }
 });
 
