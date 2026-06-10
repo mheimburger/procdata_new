@@ -362,6 +362,7 @@ const ROLES = [
   {key:"classification",  label:"Material / Service",hint:"Kategorisierung",                         type:"text"},
   {key:"purchasing_org",  label:"Purchasing org",    hint:"EinkOrganisation",                        type:"text"},
   {key:"purchasing_group",label:"Purchasing group",  hint:"Einkäufergruppe",                         type:"text"},
+  {key:"plant",           label:"Plant",             hint:"Werk — plant / site",                     type:"text"},
   {key:"document_no",     label:"Purchasing doc.",   hint:"Einkaufsbeleg — PO number",               type:"text"},
   {key:"currency",        label:"Currency",          hint:"Währung",                                 type:"text"},
 ];
@@ -532,6 +533,7 @@ const ROLE_PATTERNS={
   classification:/kategorisierung|classification|material.*service|good.*service/i,
   purchasing_org:/einkorganisation|purchasing.?org|p.?org|einkaufsorg/i,
   purchasing_group:/einkäufergruppe|einkaeufergruppe|purchasing.?group|buyer.?group/i,
+  plant:/^werk$|^werke$|werksnr|werksnummer|\bplant\b|^standort/i,
   document_no:/einkaufsbeleg|purchas.*doc|po.?number|order.?no|document.?no/i,
   currency:/währung|waehrung|currency|ccy/i,
 };
@@ -556,6 +558,7 @@ const PRESETS=[{
     classification:"Kategorisierung",
     purchasing_org:"EinkOrganisation",
     purchasing_group:"Einkäufergruppe",
+    plant:"Werk",
     document_no:"Einkaufsbeleg",
     currency:"Währung",
   }
@@ -664,7 +667,7 @@ State.sel360s=null;      // selected supplier for Lieferant 360
 State.sel360g=null;      // selected Warengruppe for Warengruppe 360
 const ROLE_LABEL={supplier:"Lieferant",category:"Warengruppe",classification:"Art",
   purchasing_org:"EinkOrg",purchasing_group:"Einkäufergr.",manufacturer:"Hersteller",
-  material:"Material",__month:"Monat"};
+  material:"Material",plant:"Werk",__month:"Monat"};
 function filteredRowsExcept(skip){
   let rows=State.rows;
   for(const role in State.filters){
@@ -854,6 +857,36 @@ function onTimeFor(rows){
   return {bands, n, onTimeRate:n?onTime/n:0, avgDiff:n?sumDiff/n:0};
 }
 function onTimeBuckets(){ return onTimeFor(filteredRows()); }
+/* #21 — Werksbezogene Bestellwerte: Ø Rechnungsbetrag je Einkaufsbeleg, je Werk */
+function plantAvgDocValue(rows){
+  rows=rows||filteredRows();
+  if(!hasRole("plant")||!hasRole("document_no")) return [];
+  const byPlant=d3.rollups(rows, v=>{
+    const docs=d3.rollups(v, x=>d3.sum(x,amt), r=>val(r,"document_no")||"(leer)");
+    const total=d3.sum(docs,d=>d[1]);
+    return {avg:docs.length?total/docs.length:0, docs:docs.length, total};
+  }, r=>{const k=val(r,"plant");return (k==null||k==="")?"(leer)":k;});
+  return byPlant.map(([key,o])=>({key, value:o.avg,
+      tip:`<b>${escHtml(key)}</b><br>Ø ${fmtCurrency(o.avg)} / Beleg<br>${fmtNumber(o.docs)} Belege · ${fmtCurrency(o.total)} gesamt<br><span class="tip-hint">Klick zum Filtern</span>`}))
+    .filter(d=>d.key!=="(leer)").sort((a,b)=>b.value-a.value);
+}
+/* #22 — Werksbezogene Ø Bestellwerte je Lieferant: je Werk Ø des belegbezogenen
+   Durchschnittswerts je Lieferant (jeder Lieferant gleich gewichtet) */
+function plantAvgDocValuePerSupplier(rows){
+  rows=rows||filteredRows();
+  if(!hasRole("plant")||!hasRole("document_no")||!hasRole("supplier")) return [];
+  const byPlant=d3.rollups(rows, v=>{
+    const bySup=d3.rollups(v, vv=>{
+      const docs=d3.rollups(vv, x=>d3.sum(x,amt), r=>val(r,"document_no")||"(leer)");
+      const t=d3.sum(docs,d=>d[1]);
+      return docs.length?t/docs.length:0;
+    }, r=>val(r,"supplier")||"(leer)");
+    return {avg:bySup.length?d3.sum(bySup,d=>d[1])/bySup.length:0, suppliers:bySup.length};
+  }, r=>{const k=val(r,"plant");return (k==null||k==="")?"(leer)":k;});
+  return byPlant.map(([key,o])=>({key, value:o.avg,
+      tip:`<b>${escHtml(key)}</b><br>Ø ${fmtCurrency(o.avg)} / Beleg je Lieferant<br>${fmtNumber(o.suppliers)} Lieferanten<br><span class="tip-hint">Klick zum Filtern</span>`}))
+    .filter(d=>d.key!=="(leer)").sort((a,b)=>b.value-a.value);
+}
 
 /* ---------- KPI / card scaffolding ---------- */
 function kpiStrip(kpis){
@@ -1057,16 +1090,12 @@ registerDashboard({
       <div class="grid">${cardHTML("st-wf",2,"Spend nach Warengruppe","Beitrag je Warengruppe — Klick filtert")}</div>
       <div class="grid grid-2" style="margin-top:20px">
         ${cardHTML("st-top",3,"Top-10 Warengruppen","Größte Kostentreiber")}
-        ${cardHTML("st-org",13,"Spend je Einkaufsorganisation","Vergleich der Einkaufsorganisationen")}
-      </div>
-      <div class="grid grid-2" style="margin-top:20px">
-        ${cardHTML("st-pg",19,"Spend je Einkäufergruppe","Governance & Steuerung")}
         ${cardHTML("st-ms",11,"Material vs. Dienstleistung","Struktur der Ausgaben")}
       </div>
+      <div class="grid" style="margin-top:20px">${cardHTML("st-pg",19,"Spend je Einkäufergruppe","Governance & Steuerung")}</div>
       <div class="grid" style="margin-top:20px">${cardHTML("st-mx",14,"Warengruppe je Einkaufsorganisation","Cross-Site-Synergien — Zelle anklicken zum Filtern")}</div>`;
     waterfall(byId("st-wf"), dimSeries(filteredRowsExcept("category"),"category",12,true), {filterRole:"category", empty:"Spalte „Warengruppenbez.“ zuordnen."});
     barH(byId("st-top"), dimSeries(filteredRowsExcept("category"),"category",10), {filterRole:"category", empty:"Warengruppe zuordnen."});
-    barV(byId("st-org"), dimSeries(filteredRowsExcept("purchasing_org"),"purchasing_org",12), {filterRole:"purchasing_org", empty:"Spalte „EinkOrganisation“ zuordnen."});
     barV(byId("st-pg"), dimSeries(filteredRowsExcept("purchasing_group"),"purchasing_group",12), {filterRole:"purchasing_group", empty:"Spalte „Einkäufergruppe“ zuordnen."});
     donut(byId("st-ms"), dimSeries(filteredRowsExcept("classification"),"classification"), {filterRole:"classification", empty:"Kategorisierung zuordnen."});
     heatmap(byId("st-mx"), spendMatrix("category","purchasing_org",12,10), {rowRole:"category", colRole:"purchasing_org", empty:"Warengruppe + EinkOrganisation zuordnen."});
@@ -1133,6 +1162,26 @@ registerDashboard({
       {label:"Bewertete Positionen", value:ot?fmtNumber(ot.n):"—", meta:"mit Plan- & Ist-Datum"},
     ])+`<div class="grid">${cardHTML("pf-ot",15,"Liefertermintreue","Abweichung Ist- vs. Plan-Lieferdatum (Tage)")}</div>`;
     barV(byId("pf-ot"), ot?ot.bands:[], {fmt:fmtNumber, abbr:fmtNumber, bottom:40, empty:"Lieferdatum + Stat.Lieferdatum zuordnen."});
+  }
+});
+
+registerDashboard({
+  id:"plants", title:"Werke", group:"Analysen",
+  subtitle:"Werksbezogene Bestellwerte und Bündelungspotenziale.", needs:["amount","plant","document_no"],
+  render(root){
+    const rows=filteredRows();
+    const plantCount=distinct(rows,"plant");
+    const avgDoc=plantAvgDocValue(rows);
+    const grandAvg=avgDoc.length?d3.mean(avgDoc,d=>d.value):0;
+    root.innerHTML=kpiStrip([
+      {label:"Werke", value:plantCount!=null?fmtNumber(plantCount):"—", meta:"eindeutig"},
+      {label:"Ø Belegwert (#21)", value:avgDoc.length?fmtCurrency(grandAvg):"—", meta:"Mittel über Werke"},
+      {label:"Höchster Ø Belegwert", value:avgDoc.length?avgDoc[0].key:"—", meta:avgDoc.length?fmtCurrency(avgDoc[0].value):"—"},
+    ])+`
+      <div class="grid">${cardHTML("pl-doc",21,"Werksbezogene Bestellwerte","Ø Rechnungsbetrag je Einkaufsbeleg — eine Säule je Werk · Klick filtert")}</div>
+      <div class="grid" style="margin-top:20px">${cardHTML("pl-sup",22,"Werksbezogene Ø Bestellwerte je Lieferant","Ø Rechnungsbetrag je Einkaufsbeleg je Lieferant — eine Säule je Werk · Klick filtert")}</div>`;
+    barV(byId("pl-doc"), plantAvgDocValue(filteredRowsExcept("plant")), {filterRole:"plant", bottom:96, empty:"Spalte „Werk“ + „Einkaufsbeleg“ zuordnen."});
+    barV(byId("pl-sup"), plantAvgDocValuePerSupplier(filteredRowsExcept("plant")), {filterRole:"plant", bottom:96, empty:"Spalte „Werk“, „Einkaufsbeleg“ + „Lieferant“ zuordnen."});
   }
 });
 
@@ -1246,6 +1295,7 @@ function generateSample(){
   ];
   const orgs=["EKO Nord","EKO Süd","EKO West","EKO Zentral"];
   const pgroups=["E01 MRO","E02 Technik","E03 Services","E04 C-Teile","E05 Bau","E06 IT"];
+  const plants=["Werk Hamburg","Werk München","Werk Köln","Werk Leipzig","Werk Dresden"];
   const materials=[]; let mid=100000;
   groups.forEach(grp=>grp.items.forEach(txt=>{
     materials.push({no:"M"+(mid++), text:txt, group:grp.g, cls:grp.cls,
@@ -1256,7 +1306,7 @@ function generateSample(){
   for(let o=0;o<1450;o++){
     const docNo=String(po++);
     const docDate=new Date(start+Math.random()*span);
-    const org=skew(orgs,1.2), pg=pick(pgroups), supplier=skew(suppliers,1.8);
+    const org=skew(orgs,1.2), pg=pick(pgroups), supplier=skew(suppliers,1.8), plant=skew(plants,1.3);
     const lead=3+Math.floor(Math.random()*40);
     const planDel=new Date(docDate.getTime()+lead*86400000);
     const varDays=Math.round(Math.random()<0.62?rand(-3,2):rand(-16,22));
@@ -1272,7 +1322,7 @@ function generateSample(){
         "Name des Lieferanten":supplier,"Hersteller":m.oem,"Warengruppenbez.":m.group,
         "Material":m.no,"Kurztext":m.text,"Nettopreis":price,"Bestellmenge":qty,
         "Bestellnettowert":net,"erf. RechnBetrag HW":Math.round(net*rand(0.97,1.03)*100)/100,
-        "EinkOrganisation":org,"Einkäufergruppe":pg,"Kategorisierung":m.cls,"Währung":"EUR",
+        "EinkOrganisation":org,"Einkäufergruppe":pg,"Werk":plant,"Kategorisierung":m.cls,"Währung":"EUR",
         "__source":"beispiel-spend.xlsx"
       });
     }
